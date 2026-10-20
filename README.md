@@ -30,7 +30,7 @@ Ejemplo en Open WebUI:
 
 El filtro consulta `/metrics` para estimar los tokens generados y `/slots` para calcular el uso del contexto. Si esos endpoints no están disponibles, seguirá mostrando los tiempos de la respuesta y usará los valores de contexto de reserva.
 
-El filtro puede usarse con distintos modelos de IA, no solo Gemma 4. Necesita un backend compatible con `llama.cpp` que ofrezca estas rutas y métricas. En otros tipos de backend, las rutas y los nombres de las métricas pueden cambiar y habría que adaptar el código.
+El filtro puede usarse con distintos modelos de IA siempre que se sirvan mediante un backend compatible con `llama.cpp` y ofrezcan estas rutas y métricas. En otros tipos de backend, las rutas y los nombres de las métricas pueden ser diferentes y habría que adaptar el código.
 
 ## Configurar el helper de métricas (opcional)
 
