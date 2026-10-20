@@ -1,6 +1,12 @@
 # Sakura Performance
 
 Filtro de Open WebUI y helper local para consultar métricas de generación de un servidor compatible con `llama.cpp`.
+En cada respuesta, el indicador muestra cuánto tarda Sakura, cuándo empieza a responder, a qué velocidad genera y cuánto contexto ocupa. Así puedes detectar demoras y ver si el contexto se acerca a su límite.
+
+Ejemplo en Open WebUI:
+
+> ⏱️ 6.41s · ⚡ 5.86s · 🚀 49.9t/s · 🟢 2.4K/40.2K (6%)
+
 
 ## Archivos
 
