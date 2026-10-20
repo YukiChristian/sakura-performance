@@ -1,6 +1,6 @@
 # Sakura Performance
 
-Filtro de Open WebUI y helper local para consultar métricas de generación de un servidor compatible con `llama.cpp`.
+Filtro de Open WebUI y helper local para consultar métricas de generación de un servidor compatible con `llama.cpp`. **Sakura es el nombre de esta configuración; el filtro no está ligado a una IA concreta.**
 En cada respuesta, el indicador muestra cuánto tarda Sakura, cuándo empieza a responder, a qué velocidad genera y cuánto contexto ocupa. Así puedes detectar demoras y ver si el contexto se acerca a su límite.
 
 Ejemplo en Open WebUI:
@@ -17,7 +17,7 @@ Ejemplo en Open WebUI:
 ## Requisitos
 
 - Open WebUI instalado directamente en Windows con Python.
-- Un servidor `llama.cpp` que exponga `/metrics` y `/slots` en el puerto `50002`.
+- Un servidor compatible con la API de `llama.cpp` que exponga `/metrics` y `/slots` (el ejemplo usa el puerto `50002`).
 - Python disponible desde PowerShell o Símbolo del sistema.
 
 ## Configurar el filtro
@@ -26,9 +26,9 @@ Ejemplo en Open WebUI:
 2. Crea una función/filtro nuevo y pega el contenido de `filter.py`, o importa el archivo si tu versión ofrece esa opción.
 3. Guarda y activa el filtro.
 4. En los ajustes del filtro, confirma `server_url` como `http://127.0.0.1:50002`. Si el servidor usa otro puerto, cambia este valor.
-5. Habilítalo para el modelo Gemma 4 que quieras medir.
+5. Habilítalo para cualquier modelo que Open WebUI envíe a ese servidor compatible con `llama.cpp`.
 
-El filtro consulta `/metrics` para estimar los tokens generados y `/slots` para calcular el uso del contexto. Si esos endpoints no están disponibles, seguirá mostrando los tiempos de la respuesta y usará los valores de contexto de reserva.
+El filtro consulta `/metrics` para estimar los tokens generados y `/slots` para calcular el uso del contexto. Si esos endpoints no están disponibles, seguirá mostrando los tiempos de la respuesta y usará los valores de contexto de reserva.\n\nEl filtro puede usarse con distintos modelos de IA, no solo Gemma 4. Necesita un backend compatible con `llama.cpp` que ofrezca estas rutas y métricas. En otros tipos de backend, las rutas y los nombres de las métricas pueden cambiar y habría que adaptar el código.
 
 ## Configurar el helper de métricas (opcional)
 
