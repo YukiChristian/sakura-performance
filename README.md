@@ -43,3 +43,19 @@ El helper lee `http://127.0.0.1:50002/metrics`. Si el servidor usa otro puerto, 
 ## Seguridad y repositorio
 
 No incluyas claves API, contraseñas, tokens, archivos de modelos, registros, audio generado ni rutas privadas de la máquina. Estos archivos no contienen credenciales. Mantén cualquier configuración local fuera del repositorio.
+
+
+## Cómo leer el indicador
+
+![Infografía del indicador de Sakura Performance: tiempo total, TTFT, velocidad de generación y uso del contexto](indicador-sakura.svg)
+
+Ejemplo:
+
+> ⏱️ 12.40s · ⚡ 0.85s · 🚀 42.3t/s · 🟢 8.2K/40.2K (20%)
+
+- **12.40s — tiempo total:** desde que Open WebUI inicia la solicitud hasta que recibe el evento final. Incluye el procesamiento del prompt, la generación y la comunicación entre componentes.
+- **0.85s — TTFT (tiempo hasta el primer token):** hasta que el filtro detecta el primer fragmento de contenido. Es una medida desde Open WebUI y no necesariamente coincide con el tiempo de prefill interno del servidor.
+- **42.3t/s — velocidad de generación:** tokens generados divididos entre los segundos de generación informados por llama.cpp. No es el tiempo total dividido entre tokens.
+- **8.2K/40.2K (20%) — contexto:** tokens de prompt reportados por el primer slot respecto al límite de contexto; K significa mil tokens. El color cambia a amarillo desde 70%, naranja desde 85% y rojo desde 95%.
+
+**Nota:** las métricas de tokens de llama.cpp son contadores del servidor. Si hay varias solicitudes simultáneas, la velocidad puede incluir actividad concurrente y no corresponder exclusivamente a una conversación. El indicador de contexto depende de que `/slots` exponga el slot activo.
