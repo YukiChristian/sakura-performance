@@ -28,7 +28,9 @@ Ejemplo en Open WebUI:
 4. En los ajustes del filtro, confirma `server_url` como `http://127.0.0.1:50002`. Si el servidor usa otro puerto, cambia este valor.
 5. Habilítalo para cualquier modelo que Open WebUI envíe a ese servidor compatible con `llama.cpp`.
 
-El filtro consulta `/metrics` para estimar los tokens generados y `/slots` para calcular el uso del contexto. Si esos endpoints no están disponibles, seguirá mostrando los tiempos de la respuesta y usará los valores de contexto de reserva.\n\nEl filtro puede usarse con distintos modelos de IA, no solo Gemma 4. Necesita un backend compatible con `llama.cpp` que ofrezca estas rutas y métricas. En otros tipos de backend, las rutas y los nombres de las métricas pueden cambiar y habría que adaptar el código.
+El filtro consulta `/metrics` para estimar los tokens generados y `/slots` para calcular el uso del contexto. Si esos endpoints no están disponibles, seguirá mostrando los tiempos de la respuesta y usará los valores de contexto de reserva.
+
+El filtro puede usarse con distintos modelos de IA, no solo Gemma 4. Necesita un backend compatible con `llama.cpp` que ofrezca estas rutas y métricas. En otros tipos de backend, las rutas y los nombres de las métricas pueden cambiar y habría que adaptar el código.
 
 ## Configurar el helper de métricas (opcional)
 
