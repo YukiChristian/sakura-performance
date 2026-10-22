@@ -46,10 +46,10 @@ El servidor usa `--host 0.0.0.0`, por lo que puede aceptar conexiones desde otro
 1. En Open WebUI, abre **Admin Panel → Functions** (en algunas versiones aparece como **Workspace → Functions**).
 2. Crea una función/filtro nuevo y pega el contenido de `filter.py`, o importa el archivo si tu versión ofrece esa opción.
 3. Guarda y activa el filtro.
-4. En los ajustes del filtro, confirma `server_url` como `http://127.0.0.1:50002`. Si el servidor usa otro puerto, cambia este valor.
-5. Habilítalo para cualquier modelo que Open WebUI envíe a ese servidor compatible con `llama.cpp`.
+4. En los ajustes del filtro, configura `server_urls` con la URL base de cada servidor compatible con `llama.cpp`, separadas por comas. Por ejemplo: `http://127.0.0.1:50002` o, si Open WebUI tiene conexiones a los puertos `10001` y `50002`, `http://127.0.0.1:10001,http://127.0.0.1:50002`. Escribe la URL base sin `/v1`, `/metrics` ni `/slots`.
+5. Habilítalo para los modelos servidos por esos endpoints. El filtro compara sus contadores antes y después de cada respuesta para elegir el servidor que registró actividad.
 
-El filtro consulta `/metrics` para estimar los tokens generados y `/slots` para calcular el uso del contexto. Si esos endpoints no están disponibles, seguirá mostrando los tiempos de la respuesta y usará los valores de contexto de reserva.
+El filtro consulta `/metrics` para estimar los tokens generados y `/slots` para calcular el uso del contexto. Si el slot no expone los campos de contexto esperados, usa el contador de tokens de prompt como estimación y el tamaño de contexto configurado como referencia. Si el servidor no expone métricas válidas, seguirá mostrando los tiempos de la respuesta y marcará velocidad/contexto como no disponibles.
 
 El filtro puede usarse con distintos modelos de IA siempre que se sirvan mediante un backend compatible con `llama.cpp` y ofrezcan estas rutas y métricas. En otros tipos de backend, las rutas y los nombres de las métricas pueden ser diferentes y habría que adaptar el código.
 
