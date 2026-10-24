@@ -46,7 +46,7 @@ El servidor usa `--host 0.0.0.0`, por lo que puede aceptar conexiones desde otro
 1. En Open WebUI, abre **Admin Panel → Functions** (en algunas versiones aparece como **Workspace → Functions**).
 2. Crea una función/filtro nuevo y pega el contenido de `filter.py`, o importa el archivo si tu versión ofrece esa opción.
 3. Guarda y activa el filtro.
-4. En los ajustes del filtro, configura `server_urls` con la URL base de cada servidor compatible con `llama.cpp`, separadas por comas. Por ejemplo: `http://127.0.0.1:50002` o, si Open WebUI tiene conexiones a los puertos `10001` y `50002`, `http://127.0.0.1:10001,http://127.0.0.1:50002`. Escribe la URL base sin `/v1`, `/metrics` ni `/slots`.
+4. En los ajustes del filtro, configura `server_urls` con la URL base de cada servidor compatible con `llama.cpp`, separadas por comas. Para Sakura usa `http://127.0.0.1:50002`, que es el backend Qwen y expone `/metrics` y `/slots`. El adaptador Sakura en `http://127.0.0.1:10001` no expone esas métricas, así que no lo agregues. Escribe la URL base sin `/v1`, `/metrics` ni `/slots`.
 5. Habilítalo para los modelos servidos por esos endpoints. El filtro compara sus contadores antes y después de cada respuesta para elegir el servidor que registró actividad.
 
 El filtro consulta `/metrics` para estimar los tokens generados y `/slots` para calcular el uso del contexto. Si el slot no expone los campos de contexto esperados, usa el contador de tokens de prompt como estimación y el tamaño de contexto configurado como referencia. Si el servidor no expone métricas válidas, seguirá mostrando los tiempos de la respuesta y marcará velocidad/contexto como no disponibles.
@@ -66,11 +66,11 @@ Ejemplo:
 | Indicador | Qué mide | Cómo interpretarlo |
 | --- | --- | --- |
 | `12.40s` — tiempo total | Tiempo desde que Open WebUI inicia la solicitud hasta que recibe el evento final. | Incluye la espera para procesar el prompt, generar la respuesta y el tiempo de comunicación entre componentes. |
-| `0.85s` — TTFT | Tiempo hasta que el filtro detecta el primer fragmento de contenido en el flujo. | Un valor bajo significa que la respuesta comienza pronto. No es necesariamente igual al tiempo de prefill informado internamente por el servidor. |
+| `0.85s` — TTFT | Tiempo hasta que el filtro detecta el primer fragmento de texto, llamada a herramienta u otra salida generada en el flujo. | Un valor bajo significa que la respuesta comienza pronto. No es necesariamente igual al tiempo de prefill informado internamente por el servidor. |
 | `42.3t/s` — velocidad | Tokens generados divididos entre los segundos de generación informados por las métricas de llama.cpp. | Es la velocidad durante la generación, no el tiempo total dividido entre tokens. Puede mostrarse como `0t/s` o no aparecer si el servidor no ofrece métricas válidas. |
 | `8.2K/40.2K (20%)` — contexto | Tokens de prompt reportados por el primer slot, el límite de contexto configurado y el porcentaje usado. `K` representa miles de tokens. | El color pasa a amarillo desde 70%, naranja desde 85% y rojo desde 95%; por debajo de 70% aparece verde. |
 
-**Nota:** las métricas de tokens de llama.cpp son contadores del servidor. Si se atienden varias solicitudes al mismo tiempo, la diferencia de contadores puede incluir actividad concurrente y la velocidad puede no corresponder exclusivamente a una sola conversación. El uso del contexto también depende de que `/slots` exponga el slot activo.
+**Nota:** el adaptador Sakura retransmite los fragmentos de Qwen conforme llegan, incluidos los fragmentos de llamadas a herramientas. Las métricas de tokens de llama.cpp son contadores del servidor. Si se atienden varias solicitudes al mismo tiempo, la diferencia de contadores puede incluir actividad concurrente y la velocidad puede no corresponder exclusivamente a una sola conversación. El uso del contexto también depende de que `/slots` exponga el slot activo.
 
 ## Configurar el helper de métricas (opcional)
 
@@ -91,4 +91,3 @@ El helper lee `http://127.0.0.1:50002/metrics`. Si el servidor usa otro puerto, 
 ## Seguridad y repositorio
 
 No incluyas claves API, contraseñas, tokens, archivos de modelos, registros, audio generado ni rutas privadas de la máquina. Estos archivos no contienen credenciales. Mantén cualquier configuración local fuera del repositorio.
-
