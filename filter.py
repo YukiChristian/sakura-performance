@@ -8,16 +8,16 @@ class Filter:
     """Muestra tiempos, velocidad y contexto de servidores compatibles con llama.cpp."""
 
     class Valves(BaseModel):
-        priority: int = Field(default=0, description="Execution priority")
+        priority: int = Field(default=0, description="Prioridad de ejecución")
         server_urls: str = Field(
-            default="http://127.0.0.1:10001,http://127.0.0.1:50002",
+            default="http://127.0.0.1:50002",
             description=(
-                "URLs base de llama-server separadas por comas. "
-                "Ejemplo: http://127.0.0.1:10001,http://127.0.0.1:50002"
+                "URLs base de los servidores llama.cpp que exponen /metrics y /slots, separadas por comas. "
+                "En Sakura, apunta al backend Qwen (http://127.0.0.1:50002), no al adaptador (puerto 10001)."
             ),
         )
-        context_size: int = Field(default=40000, description="Fallback context size")
-        request_timeout: float = Field(default=2.0, description="HTTP timeout in seconds")
+        context_size: int = Field(default=40000, description="Tamaño de contexto de respaldo")
+        request_timeout: float = Field(default=2.0, description="Tiempo máximo de espera en segundos")
 
     def __init__(self):
         self.valves = self.Valves()
@@ -119,8 +119,14 @@ class Filter:
     async def stream(self, event: dict, __event_emitter__=None) -> dict:
         now = time.perf_counter()
         for choice in event.get("choices", []):
-            content = (choice.get("delta", {}) or {}).get("content")
-            if content and self.first_token_time is None:
+            delta = choice.get("delta", {}) or {}
+            generated_output = (
+                bool(delta.get("content"))
+                or bool(delta.get("tool_calls"))
+                or bool(delta.get("function_call"))
+                or bool(delta.get("refusal"))
+            )
+            if generated_output and self.first_token_time is None:
                 self.first_token_time = now
 
         finished = event.get("done") is True or any(
@@ -229,4 +235,3 @@ class Filter:
         self.first_token_time = None
         self.metrics_start = None
         return event
-
