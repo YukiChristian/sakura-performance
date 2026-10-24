@@ -8,7 +8,7 @@ class Filter:
     """Muestra tiempos, velocidad y contexto de servidores compatibles con llama.cpp."""
 
     class Valves(BaseModel):
-        priority: int = Field(default=0, description="Execution priority")
+        priority: int = Field(default=0, description="Prioridad de ejecución")
         server_urls: str = Field(
             default="http://127.0.0.1:50002",
             description=(
@@ -16,8 +16,8 @@ class Filter:
                 "En Sakura, apunta al backend Qwen (http://127.0.0.1:50002), no al adaptador (puerto 10001)."
             ),
         )
-        context_size: int = Field(default=40000, description="Fallback context size")
-        request_timeout: float = Field(default=2.0, description="HTTP timeout in seconds")
+        context_size: int = Field(default=40000, description="Tamaño de contexto de respaldo")
+        request_timeout: float = Field(default=2.0, description="Tiempo máximo de espera en segundos")
 
     def __init__(self):
         self.valves = self.Valves()
