@@ -27,15 +27,15 @@ class LainFilterTests(unittest.TestCase):
         self.filter = Filter()
 
     def test_lain_defaults_match_server_configuration(self):
-        self.assertEqual(self.filter.valves.server_urls, "http://127.0.0.1:50003")
-        self.assertEqual(self.filter.valves.context_size, 50960)
+        self.assertEqual(self.filter.valves.server_urls, "http://127.0.0.1:50002")
+        self.assertEqual(self.filter.valves.context_size, 55000)
 
     def test_server_urls_are_normalized_and_deduplicated(self):
         self.filter.valves.server_urls = (
-            " http://127.0.0.1:50003/v1/ , http://127.0.0.1:50003 ,,"
+            " http://127.0.0.1:50002/v1/ , http://127.0.0.1:50002 ,,"
         )
         self.assertEqual(
-            self.filter.get_server_urls(), ["http://127.0.0.1:50003"]
+            self.filter.get_server_urls(), ["http://127.0.0.1:50002"]
         )
 
     def test_counter_delta_rejects_counter_reset(self):
@@ -43,7 +43,7 @@ class LainFilterTests(unittest.TestCase):
         self.assertIsNone(Filter.counter_delta({"n": 20}, {"n": 3}, "n"))
 
     def test_finished_response_emits_lain_performance_metrics(self):
-        url = "http://127.0.0.1:50003"
+        url = "http://127.0.0.1:50002"
         now = filter_module.time.perf_counter()
         self.filter.start_time = now - 10.0
         self.filter.first_token_time = now - 8.75
@@ -69,7 +69,7 @@ class LainFilterTests(unittest.TestCase):
         with (
             patch.object(self.filter, "get_server_urls", return_value=[url]),
             patch.object(self.filter, "get_llama_metrics", return_value=metrics_end),
-            patch.object(self.filter, "get_context_usage", return_value=(10000, 50960)),
+            patch.object(self.filter, "get_context_usage", return_value=(10000, 55000)),
         ):
             result = run_without_event_loop(self.filter.stream(event, emitter))
 
@@ -78,11 +78,11 @@ class LainFilterTests(unittest.TestCase):
         self.assertIn("⏱️ 10.", emitted)
         self.assertIn("⚡ 1.25s", emitted)
         self.assertIn("🚀 20.0t/s", emitted)
-        self.assertIn("🟢 10.0K/51.0K (20%)", emitted)
+        self.assertIn("🟢 10.0K/55.0K (20%)", emitted)
         self.assertIsNone(self.filter.start_time)
 
     def test_missing_metrics_still_reports_timing(self):
-        url = "http://127.0.0.1:50003"
+        url = "http://127.0.0.1:50002"
         self.filter.start_time = filter_module.time.perf_counter() - 3.0
         self.filter.first_token_time = None
         self.filter.metrics_start = {url: {}}
