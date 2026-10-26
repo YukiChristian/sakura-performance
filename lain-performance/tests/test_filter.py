@@ -78,7 +78,7 @@ class LainFilterTests(unittest.TestCase):
         self.assertIn("⏱️ 10.", emitted)
         self.assertIn("⚡ 1.25s", emitted)
         self.assertIn("🚀 20.0t/s", emitted)
-        self.assertIn("🟢 10.0K/55.0K (20%)", emitted)
+        self.assertIn("🟢 10.0K/55.0K (18%)", emitted)
         self.assertIsNone(self.filter.start_time)
 
     def test_missing_metrics_still_reports_timing(self):
