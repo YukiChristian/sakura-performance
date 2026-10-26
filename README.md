@@ -13,6 +13,8 @@ Ejemplo en Open WebUI:
 - `filter.py`: filtro de Open WebUI que muestra tiempo total, tiempo hasta el primer token, velocidad de generación y uso del contexto.
 - `metrics.py`: servicio Flask local con los endpoints `/health` y `/snapshot`.
 - `start_sakura.ps1`: inicia el helper de métricas y `llama-server` con los parámetros de ejemplo.
+- `lain-performance/`: variante del filtro para el servidor de Laín en el puerto `50003` y contexto de `50960` tokens.
+- `lain-performance/`: variante del filtro para el servidor de Laín en el puerto `50003` y contexto de `50960` tokens.
 - `requirements.txt`: dependencias del helper.
 
 ## Requisitos
@@ -91,3 +93,4 @@ El helper lee `http://127.0.0.1:50002/metrics`. Si el servidor usa otro puerto, 
 ## Seguridad y repositorio
 
 No incluyas claves API, contraseñas, tokens, archivos de modelos, registros, audio generado ni rutas privadas de la máquina. Estos archivos no contienen credenciales. Mantén cualquier configuración local fuera del repositorio.
+
