@@ -10,10 +10,10 @@ class Filter:
     class Valves(BaseModel):
         priority: int = Field(default=0, description="Prioridad de ejecución")
         server_urls: str = Field(
-            default="http://127.0.0.1:50002",
+            default="http://127.0.0.1:50003",
             description=(
                 "URLs base de los servidores llama.cpp que exponen /metrics y /slots, separadas por comas. "
-                "En Laín, apunta al llama-server local (http://127.0.0.1:50002)."
+                "En Laín, apunta al llama-server local (http://127.0.0.1:50003)."
             ),
         )
         context_size: int = Field(default=55000, description="Tamaño de contexto de respaldo de Laín")
