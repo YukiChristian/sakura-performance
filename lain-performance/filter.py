@@ -10,13 +10,13 @@ class Filter:
     class Valves(BaseModel):
         priority: int = Field(default=0, description="Prioridad de ejecución")
         server_urls: str = Field(
-            default="http://127.0.0.1:50003",
+            default="http://127.0.0.1:50002",
             description=(
                 "URLs base de los servidores llama.cpp que exponen /metrics y /slots, separadas por comas. "
-                "En Laín, apunta al llama-server local (http://127.0.0.1:50003)."
+                "En Laín, apunta al llama-server local (http://127.0.0.1:50002)."
             ),
         )
-        context_size: int = Field(default=50960, description="Tamaño de contexto de respaldo de Laín")
+        context_size: int = Field(default=55000, description="Tamaño de contexto de respaldo de Laín")
         request_timeout: float = Field(default=2.0, description="Tiempo máximo de espera en segundos")
 
     def __init__(self):
