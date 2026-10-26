@@ -27,15 +27,15 @@ class LainFilterTests(unittest.TestCase):
         self.filter = Filter()
 
     def test_lain_defaults_match_server_configuration(self):
-        self.assertEqual(self.filter.valves.server_urls, "http://127.0.0.1:50002")
+        self.assertEqual(self.filter.valves.server_urls, "http://127.0.0.1:50003")
         self.assertEqual(self.filter.valves.context_size, 55000)
 
     def test_server_urls_are_normalized_and_deduplicated(self):
         self.filter.valves.server_urls = (
-            " http://127.0.0.1:50002/v1/ , http://127.0.0.1:50002 ,,"
+            " http://127.0.0.1:50003/v1/ , http://127.0.0.1:50003 ,,"
         )
         self.assertEqual(
-            self.filter.get_server_urls(), ["http://127.0.0.1:50002"]
+            self.filter.get_server_urls(), ["http://127.0.0.1:50003"]
         )
 
     def test_counter_delta_rejects_counter_reset(self):
@@ -43,7 +43,7 @@ class LainFilterTests(unittest.TestCase):
         self.assertIsNone(Filter.counter_delta({"n": 20}, {"n": 3}, "n"))
 
     def test_finished_response_emits_lain_performance_metrics(self):
-        url = "http://127.0.0.1:50002"
+        url = "http://127.0.0.1:50003"
         now = filter_module.time.perf_counter()
         self.filter.start_time = now - 10.0
         self.filter.first_token_time = now - 8.75
@@ -82,7 +82,7 @@ class LainFilterTests(unittest.TestCase):
         self.assertIsNone(self.filter.start_time)
 
     def test_missing_metrics_still_reports_timing(self):
-        url = "http://127.0.0.1:50002"
+        url = "http://127.0.0.1:50003"
         self.filter.start_time = filter_module.time.perf_counter() - 3.0
         self.filter.first_token_time = None
         self.filter.metrics_start = {url: {}}
