@@ -1,92 +1,124 @@
 # Sakura Performance
 
-Filtro de Open WebUI y helper local para consultar métricas de generación de un servidor compatible con `llama.cpp`. **Sakura es el nombre de esta configuración; puedes usarla con otros modelos de IA.**
+Filtro de Open WebUI que mide cada respuesta de un modelo servido por `llama.cpp`: cuánto tardó, cuándo empezó a responder, a qué velocidad generó y cuánto contexto ocupa. **Sakura es el nombre de esta configuración; puedes usarlo con otros modelos de IA.**
 
-Aunque el proyecto se llama Sakura Performance, el filtro puede usarse con cualquier modelo de IA servido por una instancia compatible con `llama.cpp`. En cada respuesta muestra cuánto tarda el modelo, cuándo empieza a responder, a qué velocidad genera y cuánto contexto ocupa. Así puedes detectar demoras y ver si el contexto se acerca a su límite.
+Desde la versión 2 mide el **mensaje completo**: cuando el modelo usa herramientas (búsqueda web, comandos, scripts, memoria), Open WebUI hace varias vueltas al modelo y el filtro las suma todas, no solo la primera.
 
-Ejemplo en Open WebUI:
+Ejemplos en Open WebUI:
 
-> ⏱️ 6.41s · ⚡ 5.86s · 🚀 49.9t/s · 🟢 2.4K/40.2K (6%)
+```text
+⏱️ 2.10s · ⚡ 0.62s · 🚀 98.3t/s · 🟢 8.4K/81.9K (10%)
+⏱️ 23.94s · ⚡ 3.18s · 🚀 81.8t/s · 🟢 18.1K/81.9K (22%) · 🤔 6.3s + 🔧 2 en 7.9s + ✍️ 9.7s = 23.9s
+⏱️ 6.40s · ⚡ 0.58s · 🚀 97.8t/s · 🟢 12.1K/81.9K (15%) · 🤔 1.9s + 🔧 1 en 0.3s + ✍️ 4.2s = 6.4s · 💾 leyó 3, guardó 1 · 🔊 RTF 0.45
+```
 
 ## Archivos
 
-- `filter.py`: filtro de Open WebUI que muestra tiempo total, tiempo hasta el primer token, velocidad de generación y uso del contexto.
-- `metrics.py`: servicio Flask local con los endpoints `/health` y `/snapshot`.
+- `filter.py`: el filtro de Open WebUI (versión 2.2.0).
+- `ver_rendimiento.py`: resumen del historial que guarda el filtro (opcional).
+- `metrics.py`: servicio Flask local con los endpoints `/health` y `/snapshot` (opcional).
 - `start_sakura.ps1`: inicia el helper de métricas y `llama-server` con los parámetros de ejemplo.
 - `requirements.txt`: dependencias del helper.
 
-## Requisitos
-
-- Open WebUI instalado directamente en Windows con Python.
-- Un servidor compatible con la API de `llama.cpp` que exponga `/metrics` y `/slots` (el ejemplo usa el puerto `50002`).
-- Python disponible desde PowerShell o Símbolo del sistema.
-
-## Arrancar el servidor y las métricas
-
-El lanzador inicia `metrics.py` y luego ejecuta `llama-server` con los parámetros del proyecto. Usa un archivo GGUF que ya exista en el disco; **el script usa `--model` y no descarga Gemma ni ningún otro modelo**.
-
-Primero instala las dependencias del helper:
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-Después, desde la carpeta del proyecto, pasa la ruta al GGUF local:
-
-```powershell
-.\start_sakura.ps1 -ModelPath "C:\ruta\a\tu-modelo.gguf"
-```
-
-Por defecto, el script busca `llama-server.exe` en `C:\Llama-Sakura\build-cuda\bin\Release\llama-server.exe`; si lo tienes en otro lugar, cambia `$ServerExe` al inicio de `start_sakura.ps1`. El helper escucha en `127.0.0.1:5050` y el servidor en el puerto `50002`. Al detener `llama-server`, el lanzador cierra el proceso de métricas.
-
-El servidor usa `--host 0.0.0.0`, por lo que puede aceptar conexiones desde otros equipos de la red. Para limitarlo a esta computadora, cambia ese valor a `127.0.0.1` en `start_sakura.ps1`.
-
-## Configurar el filtro
-
-1. En Open WebUI, abre **Admin Panel → Functions** (en algunas versiones aparece como **Workspace → Functions**).
-2. Crea una función/filtro nuevo y pega el contenido de `filter.py`, o importa el archivo si tu versión ofrece esa opción.
-3. Guarda y activa el filtro.
-4. En los ajustes del filtro, configura `server_urls` con la URL base de cada servidor compatible con `llama.cpp`, separadas por comas. Para Sakura usa `http://127.0.0.1:50002`, que es el backend Qwen y expone `/metrics` y `/slots`. El adaptador Sakura en `http://127.0.0.1:10001` no expone esas métricas, así que no lo agregues. Escribe la URL base sin `/v1`, `/metrics` ni `/slots`.
-5. Habilítalo para los modelos servidos por esos endpoints. El filtro compara sus contadores antes y después de cada respuesta para elegir el servidor que registró actividad.
-
-El filtro consulta `/metrics` para estimar los tokens generados y `/slots` para calcular el uso del contexto. Si el slot no expone los campos de contexto esperados, usa el contador de tokens de prompt como estimación y el tamaño de contexto configurado como referencia. Si el servidor no expone métricas válidas, seguirá mostrando los tiempos de la respuesta y marcará velocidad/contexto como no disponibles.
-
-El filtro puede usarse con distintos modelos de IA siempre que se sirvan mediante un backend compatible con `llama.cpp` y ofrezcan estas rutas y métricas. En otros tipos de backend, las rutas y los nombres de las métricas pueden ser diferentes y habría que adaptar el código.
-
-## Cómo leer el indicador
+## Cómo leer la línea
 
 ![Infografía del indicador de Sakura Performance: tiempo total, TTFT, velocidad de generación y uso del contexto](indicador-sakura.svg)
 
-Ejemplo:
+Los cuatro primeros datos aparecen siempre:
 
-```text
-⏱️ 12.40s · ⚡ 0.85s · 🚀 42.3t/s · 🟢 8.2K/40.2K (20%)
+| Indicador | Qué mide |
+| --- | --- |
+| `⏱️ 23.94s` — tiempo total | Desde que Open WebUI recibe el mensaje hasta la última palabra de la respuesta final, con todas las vueltas y herramientas. |
+| `⚡ 3.18s` — primer token | Hasta la primera salida del modelo (texto, razonamiento o llamada a herramienta). |
+| `🚀 81.8t/s` — velocidad | Tokens generados entre los segundos de generación, sumando todas las vueltas. No es el tiempo total entre tokens. |
+| `🟢 18.1K/81.9K (22%)` — contexto | Tokens de la última vuelta y el límite del slot. Amarillo desde 70%, naranja desde 85% y rojo desde 95%. |
+
+Los demás aparecen solo cuando ocurren:
+
+| Indicador | Cuándo aparece | Qué mide |
+| --- | --- | --- |
+| `🤔 6.3s + 🔧 2 en 7.9s + ✍️ 9.7s = 23.9s` | El modelo usó herramientas | 🤔 lo que tardó en pensar qué hacer (las vueltas antes de la última), 🔧 cuántas herramientas usó y cuánto esperó por ellas (con `(1 falló)` si alguna falló), ✍️ la respuesta final. La suma da el total. |
+| `💾 leyó 3, guardó 1` | Hubo recuerdos | Recuerdos que el proxy de memoria leyó para la conversación, y los que se guardaron, actualizaron o borraron. `❌ no guardó` si una escritura falló. |
+| `🔊 RTF 0.45` | Se reprodujo la voz | Segundos de síntesis entre segundos de audio. Por debajo de 1 la voz fluye; con `⚠️` va más lenta que el texto y se corta entre frases. Se añade cuando termina el audio. |
+
+## Configurar el filtro
+
+1. En Open WebUI abre **Admin Panel → Functions** (o **Workspace → Functions**).
+2. Crea una función nueva, pega el contenido de `filter.py`, guarda y actívala.
+3. Asígnala a los modelos que quieras medir y ajusta sus válvulas:
+
+| Válvula | Valor |
+| --- | --- |
+| `server_urls` | URL base de `llama-server` sin `/v1`, por ejemplo `http://127.0.0.1:50000`. Si usas un proxy delante, pon el `llama-server`, no el proxy: el filtro lee `/metrics` y `/slots`. |
+| `model` | En modo router (`--models-preset`), el perfil del modelo, por ejemplo `qwen-9b`. Vacío si el servidor tiene un solo modelo. El filtro pide `autoload=false`, así que nunca carga ni cambia modelos. |
+| `assistant` | Nombre de la asistente para el historial. |
+| `context_size` | Contexto de respaldo si el slot no informa `n_ctx`. |
+| `tts_url` | URL del servidor de voz para `🔊`, por ejemplo `http://127.0.0.1:5052`. Vacío: sin voz. |
+| `tts_wait_seconds` | Cuánto esperar a que se pulse la bocina después del texto (300 por defecto). |
+| `history_db` | Ruta de una base SQLite para el historial. Vacío: sin historial. |
+
+El filtro usa el hook `request` de Open WebUI 0.13, que se ejecuta antes de cada vuelta al modelo, y lee las herramientas y sus resultados del mensaje final en `outlet`. Con versiones anteriores sigue funcionando, pero 🔧 marca 0 s.
+
+## Qué necesita cada indicador
+
+- **Tiempos, 🤔, 🔧 y ✍️:** solo Open WebUI.
+- **🚀 y contexto:** `/metrics` (llama-server con `--metrics`) y `/slots`.
+- **💾 leyó N y desglose exacto por vuelta (opcional):** si tienes un proxy entre Open WebUI y `llama-server`, puede añadir al último fragmento del stream un campo `sakura_metrics` con números, nunca texto:
+
+  ```json
+  {"sakura_metrics": {"memories": 3, "relationships": 0, "retrieval_ms": 120.5, "model": "qwen-9b",
+    "timings": {"cache_n": 13630, "prompt_n": 12, "prompt_ms": 210.4, "predicted_n": 34, "predicted_ms": 380.2}}}
+  ```
+
+  `timings` son los que `llama-server` envía en su último fragmento. Sin este campo, el filtro calcula la velocidad con las diferencias de `/metrics`.
+- **💾 guardó, actualizó o borró:** herramientas llamadas `save_<nombre>_memory`, `update_<nombre>_memory` y `delete_<nombre>_memory`. Una respuesta que empiece por "No se…" cuenta como fallo.
+- **🔊:** el servidor de voz debe exponer `GET /metrics?since=<epoch>` y devolver las frases terminadas después de esa hora:
+
+  ```json
+  {"samples": [{"finished_at": 1794080000.5, "chars": 84, "audio_seconds": 5.2, "synthesis_seconds": 2.3, "queue_seconds": 0.0, "rtf": 0.44}]}
+  ```
+
+## Historial
+
+Con `history_db` configurada, cada mensaje se guarda en la tabla `mediciones`: fecha, asistente, modelo, **nombre completo del GGUF** (por ejemplo `Qwen3.5-9B.Q6_K`), tiempos, herramientas usadas, recuerdos, voz y el desglose de cada vuelta. **Nunca se guarda texto del chat.**
+
+```powershell
+python ver_rendimiento.py --db C:\ruta\rendimiento.db               # promedios de los últimos 7 días
+python ver_rendimiento.py --db C:\ruta\rendimiento.db --ultimos 20  # una línea por mensaje
+python ver_rendimiento.py --db C:\ruta\rendimiento.db --detalle     # desglose por vuelta
 ```
 
-| Indicador | Qué mide | Cómo interpretarlo |
-| --- | --- | --- |
-| `12.40s` — tiempo total | Tiempo desde que Open WebUI inicia la solicitud hasta que recibe el evento final. | Incluye la espera para procesar el prompt, generar la respuesta y el tiempo de comunicación entre componentes. |
-| `0.85s` — TTFT | Tiempo hasta que el filtro detecta el primer fragmento de texto, llamada a herramienta u otra salida generada en el flujo. | Un valor bajo significa que la respuesta comienza pronto. No es necesariamente igual al tiempo de prefill informado internamente por el servidor. |
-| `42.3t/s` — velocidad | Tokens generados divididos entre los segundos de generación informados por las métricas de llama.cpp. | Es la velocidad durante la generación, no el tiempo total dividido entre tokens. Puede mostrarse como `0t/s` o no aparecer si el servidor no ofrece métricas válidas. |
-| `8.2K/40.2K (20%)` — contexto | Tokens de prompt reportados por el primer slot, el límite de contexto configurado y el porcentaje usado. `K` representa miles de tokens. | El color pasa a amarillo desde 70%, naranja desde 85% y rojo desde 95%; por debajo de 70% aparece verde. |
+Ejemplo de `--detalle`:
 
-**Nota:** el adaptador Sakura retransmite los fragmentos de Qwen conforme llegan, incluidos los fragmentos de llamadas a herramientas. Las métricas de tokens de llama.cpp son contadores del servidor. Si se atienden varias solicitudes al mismo tiempo, la diferencia de contadores puede incluir actividad concurrente y la velocidad puede no corresponder exclusivamente a una sola conversación. El uso del contexto también depende de que `/slots` exponga el slot activo.
+```text
+⏱️ 10.9s total
+├─ Preparación de Open WebUI       2.0s
+├─ Vuelta 1: piensa qué hacer 🤔     2.0s
+│   ├─ 💾 búsqueda de recuerdos      0.5s
+│   ├─ 📥 leer el prompt              0.2s (27 nuevos, 13638 en caché)
+│   ├─ ✏️ escribir                     0.8s (76 tokens)
+│   └─ ⏳ Open WebUI, proxy y red      0.4s
+├─ 🔧 herramientas                  1.9s
+└─ Vuelta 2: respuesta final ✍️     5.0s
+```
 
-## Configurar el helper de métricas (opcional)
+## Arrancar el servidor y las métricas (opcional)
 
-Abre PowerShell en esta carpeta y ejecuta:
+El lanzador inicia `metrics.py` y luego `llama-server` con un GGUF que ya exista en el disco; **no descarga ningún modelo**.
 
 ```powershell
 python -m pip install -r requirements.txt
-python metrics.py
+.\start_sakura.ps1 -ModelPath "C:\ruta\a\tu-modelo.gguf"
 ```
 
-El helper queda escuchando solo en el equipo local, en `127.0.0.1:5050`. Puedes comprobarlo en el navegador:
+Por defecto busca `llama-server.exe` en `C:\Llama-Sakura\build-cuda\bin\Release\llama-server.exe`; cambia `$ServerExe` al inicio de `start_sakura.ps1` si está en otro lugar. El helper escucha en `127.0.0.1:5050` y el servidor en el puerto `50002`, con `--host 0.0.0.0`; cámbialo a `127.0.0.1` para limitarlo a esta computadora.
 
-- `http://127.0.0.1:5050/health`: estado de conexión y cantidad de métricas.
-- `http://127.0.0.1:5050/snapshot`: resumen JSON de tokens, tiempos y velocidad.
+El helper ofrece `http://127.0.0.1:5050/health` y `http://127.0.0.1:5050/snapshot` (resumen JSON de tokens, tiempos y velocidad). Lee `http://127.0.0.1:50002/metrics`; si usas otro puerto, edita `LLAMA_METRICS` en `metrics.py`.
 
-El helper lee `http://127.0.0.1:50002/metrics`. Si el servidor usa otro puerto, edita `LLAMA_METRICS` en `metrics.py`.
+## Notas
+
+- Las métricas de `llama.cpp` son contadores del servidor: con varias solicitudes simultáneas al mismo modelo, la velocidad calculada por diferencia puede mezclar actividad de otras conversaciones. Los `timings` del proxy no tienen ese problema.
+- El filtro guarda su estado por `message_id`, así que varios chats a la vez no se mezclan.
 
 ## Seguridad y repositorio
 
