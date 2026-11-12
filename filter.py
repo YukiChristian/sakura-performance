@@ -1,7 +1,7 @@
 """
 title: Sakura Performance
-description: Mide el mensaje completo (búsquedas, comandos, memoria e imágenes con barra de progreso), la voz, avisa de acciones fingidas y guarda un historial sin texto.
-version: 2.4.0
+description: Mide el mensaje completo (búsquedas, comandos, memoria e imágenes), la voz, avisa de acciones fingidas y guarda un historial sin texto.
+version: 2.5.0
 """
 
 from pydantic import BaseModel, Field
@@ -35,15 +35,6 @@ MEMORY_FAILURE = re.compile(
 MEMORY_DUPLICATE = re.compile(r"\bya exist[ií]a\b", re.IGNORECASE)
 # Herramientas de imagen de Open WebUI (ComfyUI, OpenAI, etc.).
 IMAGE_TOOLS = {"generate_image", "edit_image"}
-PROGRESS_BAR_CELLS = 10
-# Fases que publica el proxy de ComfyUI en /progreso (ver README).
-IMAGE_PHASES = {
-    "abriendo": "🎨 Abriendo ComfyUI…",
-    "cargando": "🎨 Cargando el modelo de imagen…",
-    "generando": "🎨 Generando imagen",
-    "terminada": "🎨 Imagen lista",
-    "error": "🎨 ❌ La imagen falló",
-}
 # Nombre del GGUF de cada perfil del router: se vuelve a preguntar pasado este tiempo
 # (antes se guardaba para siempre y, al cambiar de modelo, el historial seguía con el viejo).
 MODEL_NAME_SECONDS = 300
@@ -161,25 +152,6 @@ def call_seconds(call: dict):
     return None
 
 
-def progress_bar(percent: int) -> str:
-    filled = max(0, min(PROGRESS_BAR_CELLS, round(percent * PROGRESS_BAR_CELLS / 100)))
-    return "█" * filled + "░" * (PROGRESS_BAR_CELLS - filled)
-
-
-def image_status(state: dict, elapsed: float) -> str:
-    """Texto de la barra a partir del estado que publica el proxy de ComfyUI."""
-    phase = state.get("fase")
-    label = IMAGE_PHASES.get(phase, "🎨 Preparando la imagen…")
-    if phase == "generando":
-        percent = int(state.get("porcentaje") or 0)
-        return f"{label} {progress_bar(percent)} {percent}% · paso {state.get('paso', 0)}/{state.get('pasos', 0)}"
-    if phase == "terminada":
-        return f"{label} {progress_bar(100)} 100% · {elapsed:.1f}s"
-    if phase == "cargando":
-        return f"{label} {progress_bar(0)} 0%"
-    return label
-
-
 def message_text(message) -> str:
     """Texto de un mensaje de Open WebUI (cadena o lista de partes)."""
     content = message.get("content") if isinstance(message, dict) else ""
@@ -250,10 +222,6 @@ class Filter:
         history_db: str = Field(
             default="",
             description="Ruta de una base SQLite para el historial (solo números, nunca texto del chat). Vacío: sin historial.",
-        )
-        image_progress_url: str = Field(
-            default="",
-            description="URL de progreso del proxy de ComfyUI (http://127.0.0.1:8190/progreso) para la barra 🎨. Vacío: sin barra.",
         )
 
     def __init__(self):
@@ -496,14 +464,6 @@ class Filter:
                 name = (call.get("function") or {}).get("name")
                 if name:
                     run["stream_tool_names"].append(name)
-                    # El modelo pidió una imagen: Open WebUI la genera al acabar esta vuelta.
-                    if (
-                        name in IMAGE_TOOLS
-                        and __event_emitter__
-                        and (self.valves.image_progress_url or "").strip()
-                        and not run.get("image_watch")
-                    ):
-                        run["image_watch"] = asyncio.create_task(self.watch_image(run, __event_emitter__))
             if choice.get("finish_reason") is not None:
                 current["end"] = now
                 current["finish_reason"] = choice.get("finish_reason")
@@ -516,10 +476,6 @@ class Filter:
         run = self.runs.pop(key, None)
         if run is None:
             return body
-        run["done"] = True  # detiene la barra de imagen si sigue viva
-        watcher = run.get("image_watch")
-        if watcher is not None and not watcher.done():
-            watcher.cancel()
         now = time.perf_counter()
         rounds = [r for r in run["rounds"] if r.get("end") is not None] or [
             {"start": run["start"], "end": now, "core": None}
@@ -740,44 +696,6 @@ class Filter:
                 self.watch_voice(key, run["wall_start"], line, __event_emitter__, run.get("chat_id", ""))
             )
         return body
-
-    # ----------------------------------------------------------------- imagen
-
-    def get_image_progress(self) -> dict:
-        try:
-            response = requests.get(self.valves.image_progress_url.strip(), timeout=self.valves.request_timeout)
-            response.raise_for_status()
-            data = response.json()
-            return data if isinstance(data, dict) else {}
-        except (requests.RequestException, ValueError):
-            return {}
-
-    async def watch_image(self, run: dict, emitter) -> None:
-        """Barra de progreso mientras Open WebUI genera la imagen. Solo emite cuando cambia el
-        texto (no a cada consulta) para no llenar el historial de estados del mensaje."""
-        try:
-            started = time.time()
-            rounds_at_start = len(run["rounds"])
-            last = None
-            while time.time() - started < 900 and not run.get("done"):
-                # La vuelta siguiente al modelo empieza cuando la herramienta ya terminó: se lee
-                # el estado una última vez (para mostrar "lista") y se para.
-                tool_finished = len(run["rounds"]) > rounds_at_start
-                state = await asyncio.to_thread(self.get_image_progress)
-                # Solo cuenta una imagen empezada después de que el modelo la pidió.
-                if state and float(state.get("iniciada") or 0) < started - 2:
-                    state = {}
-                text = image_status(state, time.time() - started)
-                if text != last and not run.get("done"):
-                    await emitter({"type": "status", "data": {"description": text, "done": False, "hidden": False}})
-                    last = text
-                if state.get("fase") in ("terminada", "error") or tool_finished:
-                    break
-                await asyncio.sleep(0.5)
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------- voz
 

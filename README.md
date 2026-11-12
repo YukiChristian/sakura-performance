@@ -14,7 +14,7 @@ Ejemplos en Open WebUI:
 
 ## Archivos
 
-- `filter.py`: el filtro de Open WebUI (versión 2.4.0).
+- `filter.py`: el filtro de Open WebUI (versión 2.5.0).
 - `test_filtro.py` y `test_acciones_fingidas.py`: pruebas (`python -m unittest test_filtro test_acciones_fingidas`).
 - `ver_rendimiento.py`: resumen del historial que guarda el filtro (opcional).
 - `metrics.py`: servicio Flask local con los endpoints `/health` y `/snapshot` (opcional).
@@ -46,28 +46,6 @@ Los demás aparecen solo cuando ocurren:
 | `⚠️ pediste guardar y no usó la herramienta de memoria` | Acción fingida | El mensaje pedía guardar un recuerdo ("guárdalo como recuerdo", "anótalo en tu memoria", "memorízalo") y no hubo llamada de memoria. |
 | `⚠️ describió una acción sin usar ninguna herramienta` | Acción fingida | La respuesta narra un paso como `(Accediendo a la carpeta…)` o `*Leyendo el archivo...*` sin haber llamado a ninguna herramienta: lo que cuenta a continuación es inventado. |
 
-### Barra de progreso de la imagen
-
-Mientras se genera una imagen, el filtro muestra en el estado del mensaje:
-
-```text
-🎨 Abriendo ComfyUI…
-🎨 Cargando el modelo de imagen… ░░░░░░░░░░ 0%
-🎨 Generando imagen ████░░░░░░ 38% · paso 3/8
-🎨 Imagen lista ██████████ 100% · 13.6s
-```
-
-Al terminar el mensaje, la línea normal la sustituye y conserva `🎨 1 imagen en 13.6s`.
-
-Open WebUI no expone el progreso de ComfyUI: ComfyUI lo manda por WebSocket solo al cliente que pidió la imagen. Para leerlo hace falta un proxy entre Open WebUI y ComfyUI que mire esos mensajes (`execution_start`, `progress`, `executing`) sin cambiarlos y publique el estado en un endpoint HTTP:
-
-```json
-GET http://127.0.0.1:8190/progreso
-{"fase": "generando", "paso": 3, "pasos": 8, "porcentaje": 38, "iniciada": 1794460000.1, "actualizada": 1794460004.7, "prompt_id": "…"}
-```
-
-`fase` puede ser `abriendo`, `cargando`, `generando`, `terminada`, `error` o `inactivo`. Pon esa URL en la válvula `image_progress_url`; vacía, no hay barra (el tiempo `🎨` se mide igual). El filtro empieza a consultar cuando el modelo llama a la herramienta de imagen, solo acepta imágenes que empezaron después de esa llamada y solo emite un estado cuando cambia el texto, para no llenar el historial de estados del mensaje.
-
 ### Acciones fingidas
 
 Algunos modelos pequeños, en vez de llamar a la herramienta, escriben como si lo hubieran hecho: "He guardado el recuerdo", "(Accediendo a la carpeta…)". Open WebUI no lo distingue de una acción real. El filtro compara el texto de la respuesta con las herramientas que de verdad se llamaron en ese mensaje y añade el aviso a la línea de estado. En el historial queda en la columna `acciones_fingidas` (`memoria`, `memoria_pedida`, `herramienta`), sin texto del chat.
@@ -93,7 +71,6 @@ python -m unittest test_acciones_fingidas
 | `tts_url` | URL del servidor de voz para `🔊`, por ejemplo `http://127.0.0.1:5052`. Vacío: sin voz. |
 | `tts_wait_seconds` | Cuánto esperar a que se pulse la bocina después del texto (300 por defecto). |
 | `history_db` | Ruta de una base SQLite para el historial. Vacío: sin historial. |
-| `image_progress_url` | URL de progreso de imagen, por ejemplo `http://127.0.0.1:8190/progreso` (ver "Barra de progreso de la imagen"). Vacío: sin barra. |
 
 El filtro usa el hook `request` de Open WebUI 0.13, que se ejecuta antes de cada vuelta al modelo, y lee las herramientas y sus resultados del mensaje final en `outlet`. Con versiones anteriores sigue funcionando, pero 🔧 marca 0 s.
 

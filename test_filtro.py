@@ -1,4 +1,4 @@
-"""Pruebas del filtro: memoria, errores de herramientas, imágenes y barra de progreso.
+"""Pruebas del filtro: memoria, errores de herramientas e imágenes.
 
     python -m unittest test_filtro test_acciones_fingidas
 """
@@ -59,14 +59,6 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(f.call_seconds({"started_at": 10.0, "ended_at": 22.5}), 12.5)
         self.assertIsNone(f.call_seconds({}))
 
-    def test_progress_text(self):
-        self.assertEqual(f.progress_bar(50), "█████░░░░░")
-        text = f.image_status({"fase": "generando", "paso": 3, "pasos": 8, "porcentaje": 38}, 4.0)
-        self.assertEqual(text, "🎨 Generando imagen ████░░░░░░ 38% · paso 3/8")
-        self.assertIn("100%", f.image_status({"fase": "terminada"}, 12.34))
-        self.assertIn("12.3s", f.image_status({"fase": "terminada"}, 12.34))
-        self.assertEqual(f.image_status({}, 1), "🎨 Preparando la imagen…")
-
 
 class OutletTests(unittest.TestCase):
     def make_filter(self, db=""):
@@ -79,7 +71,7 @@ class OutletTests(unittest.TestCase):
                                                      if not k.startswith("_")},
                                                   "server_urls": "http://127.0.0.1:9", "history_db": db,
                                                   "request_timeout": 0.2, "model": "", "tts_url": "",
-                                                  "image_progress_url": "", "context_size": 81920,
+                                                  "context_size": 81920,
                                                   "assistant": "Sakura"})
         return flt
 
