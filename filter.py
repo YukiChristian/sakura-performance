@@ -1,7 +1,7 @@
 """
 title: Sakura Performance
-description: Mide el mensaje completo (con búsquedas, comandos y memoria), la voz, y guarda un historial sin texto.
-version: 2.2.0
+description: Mide el mensaje completo (con búsquedas, comandos y memoria), la voz, avisa de acciones fingidas y guarda un historial sin texto.
+version: 2.3.0
 """
 
 from pydantic import BaseModel, Field
@@ -31,6 +31,44 @@ MEMORY_FAILURE = re.compile(
 )
 # Un mensaje abandonado (error, pestaña cerrada) se olvida a la hora.
 STALE_SECONDS = 3600
+
+# Acciones fingidas: el modelo dice que hizo algo sin llamar a la herramienta. Gemma 4 12B
+# llegó a escribir "He guardado el recuerdo…" o "(Accediendo a la carpeta…)" sin ninguna
+# llamada, y la memoria seguía igual (2026-11-11).
+# Se pide guardar un recuerdo: "guárdalo como recuerdo", "anótalo en tu memoria",
+# "memorízalo". "Guarda la imagen" o "recuerda que es anime" no cuentan: hace falta que
+# hable de recuerdos o memoria.
+SAVE_REQUEST = re.compile(
+    r"\b(gu[aá]rda(lo|la|los|las|me)?|guardar|an[oó]ta(lo|la|los|las)?|anotar|ap[uú]nta(lo|la)?|"
+    r"gr[aá]ba(lo|la|te)|registra(lo|la)?)\b[^.?!\n]{0,60}\b(recuerdos?|memoria)\b|"
+    r"\bmemor[ií]za(lo|la|los|las)?\b|\bno\s+(lo\s+|la\s+)?olvides\b",
+    re.IGNORECASE,
+)
+# El modelo afirma que guardó un recuerdo. Verbos que en el chat casi solo significan eso:
+SAVE_CLAIM = re.compile(
+    r"\b(he|ya|lo|la|los|las|te\s+lo)\s+(he\s+)?(guardado|grabado|anotado|apuntado|memorizado)\b|"
+    r"\b(guard[eé]|anot[eé]|grab[eé]|apunt[eé]|memoric[eé])\b|"
+    r"\b(qued[oó]|quedaron|est[aá]n?)\s+(bien\s+)?(guardad[oa]s?|grabad[oa]s?|anotad[oa]s?)\b|"
+    r"\b(he\s+)?tomado\s+nota\b|"
+    r"\b(en|a)\s+mi\s+memoria\s+persistente\b",
+    re.IGNORECASE,
+)
+# Verbos que también se usan para archivos o código: cuentan solo cerca de "recuerdo" o "memoria".
+MEMORY_EDIT_CLAIM = re.compile(
+    r"\b(he\s+)?(actualizado|corregido|borrado|eliminado|registrado|integrado|actualic[eé]|correg[ií]|"
+    r"borr[eé]|elimin[eé]|registr[eé]|integr[eé])\b[^.\n]{0,60}\b(recuerdos?|memoria)\b|"
+    r"\b(recuerdos?|memoria)\b[^.\n]{0,40}\b(actualizad[oa]s?|corregid[oa]s?|borrad[oa]s?|eliminad[oa]s?)\b",
+    re.IGNORECASE,
+)
+# El modelo narra una acción con herramientas que no llamó: "(Accediendo a la carpeta…)",
+# "*Procediendo a leer el archivo...*", o escribe la llamada como texto.
+ACTION_PLACEHOLDER = re.compile(
+    r"[(*_]\s*(Accediendo|Procesando|Procediendo|Leyendo|Analizando|Consultando|Revisando|Buscando|"
+    r"Explorando|Ejecutando|Abriendo|Descargando)\b[^)\n]{0,120}?(\.\.\.|…)",
+    re.IGNORECASE,
+)
+# La llamada escrita como texto en lugar de hacerla: save_sakura_memory(content="…").
+FAKE_MEMORY_CALL = re.compile(r"\b(save|update|delete)_[a-z0-9]+_memory\s*\(", re.IGNORECASE)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS mediciones (
@@ -70,7 +108,47 @@ CREATE TABLE IF NOT EXISTS mediciones (
 CREATE INDEX IF NOT EXISTS mediciones_fecha ON mediciones (fecha);
 """
 # Columnas añadidas después de la versión 2.0.0 (se crean si faltan).
-EXTRA_COLUMNS = {"decidir_s": "REAL", "vueltas_detalle": "TEXT"}
+EXTRA_COLUMNS = {"decidir_s": "REAL", "vueltas_detalle": "TEXT", "acciones_fingidas": "TEXT"}
+
+
+def message_text(message) -> str:
+    """Texto de un mensaje de Open WebUI (cadena o lista de partes)."""
+    content = message.get("content") if isinstance(message, dict) else ""
+    if isinstance(content, list):
+        return " ".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
+    return content if isinstance(content, str) else ""
+
+
+def strip_quotes(text: str) -> str:
+    """Quita bloques de código y citas para no tomar ejemplos como afirmaciones."""
+    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    text = re.sub(r"`[^`\n]*`", " ", text)
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
+
+
+def find_faked_actions(user_text: str, answer: str, memory_writes: int, memory_failures: int, other_tools: int) -> list:
+    """Avisos (sin texto del chat) cuando la respuesta afirma algo que no ocurrió en este mensaje."""
+    raw = answer or ""
+    answer = strip_quotes(raw)
+    warnings = []
+    if memory_writes == 0:
+        # La llamada escrita como texto se busca también dentro de `código` (suele salir así),
+        # pero no en bloques ``` que pueden ser un ejemplo pedido.
+        no_blocks = re.sub(r"```.*?```", " ", raw, flags=re.DOTALL)
+        if SAVE_CLAIM.search(answer) or MEMORY_EDIT_CLAIM.search(answer) or FAKE_MEMORY_CALL.search(no_blocks):
+            warnings.append("memoria")
+        elif SAVE_REQUEST.search(strip_quotes(user_text or "")) and not memory_failures:
+            warnings.append("memoria_pedida")
+    if other_tools == 0 and ACTION_PLACEHOLDER.search(answer):
+        warnings.append("herramienta")
+    return warnings
+
+
+FAKED_LABELS = {
+    "memoria": "⚠️ dijo que guardó, pero no usó la herramienta de memoria: no se guardó nada",
+    "memoria_pedida": "⚠️ pediste guardar y no usó la herramienta de memoria: no se guardó nada",
+    "herramienta": "⚠️ describió una acción (leer, buscar, abrir…) sin usar ninguna herramienta",
+}
 
 
 class Filter:
@@ -475,6 +553,16 @@ class Filter:
                 memory_parts.append(f"❌ {fail_word}")
         if memory_parts:
             parts.append("💾 " + ", ".join(memory_parts))
+        # Acciones fingidas: se compara lo que dice la respuesta con las herramientas que se llamaron.
+        user_message = next((m for m in reversed(messages) if m.get("role") == "user"), {})
+        faked = find_faked_actions(
+            message_text(user_message),
+            message_text(assistant),
+            sum(memory_ok.values()),
+            sum(memory_failed.values()),
+            len(tool_names),
+        )
+        parts.extend(FAKED_LABELS[w] for w in faked)
         line = " · ".join(parts)
 
         if __event_emitter__:
@@ -539,6 +627,7 @@ class Filter:
             "memoria_actualizados": memory_ok["update"],
             "memoria_borrados": memory_ok["delete"],
             "memoria_fallos": sum(memory_failed.values()),
+            "acciones_fingidas": ",".join(faked) or None,
             "linea": line,
         }
         await asyncio.to_thread(self.save_history, key, row)

@@ -14,7 +14,8 @@ Ejemplos en Open WebUI:
 
 ## Archivos
 
-- `filter.py`: el filtro de Open WebUI (versión 2.2.0).
+- `filter.py`: el filtro de Open WebUI (versión 2.3.0).
+- `test_acciones_fingidas.py`: pruebas del aviso de acciones fingidas.
 - `ver_rendimiento.py`: resumen del historial que guarda el filtro (opcional).
 - `metrics.py`: servicio Flask local con los endpoints `/health` y `/snapshot` (opcional).
 - `start_sakura.ps1`: inicia el helper de métricas y `llama-server` con los parámetros de ejemplo.
@@ -40,6 +41,19 @@ Los demás aparecen solo cuando ocurren:
 | `🤔 6.3s + 🔧 2 en 7.9s + ✍️ 9.7s = 23.9s` | El modelo usó herramientas | 🤔 lo que tardó en pensar qué hacer (las vueltas antes de la última), 🔧 cuántas herramientas usó y cuánto esperó por ellas (con `(1 falló)` si alguna falló), ✍️ la respuesta final. La suma da el total. |
 | `💾 leyó 3, guardó 1` | Hubo recuerdos | Recuerdos que el proxy de memoria leyó para la conversación, y los que se guardaron, actualizaron o borraron. `❌ no guardó` si una escritura falló. |
 | `🔊 RTF 0.45` | Se reprodujo la voz | Segundos de síntesis entre segundos de audio. Por debajo de 1 la voz fluye; con `⚠️` va más lenta que el texto y se corta entre frases. Se añade cuando termina el audio. |
+| `⚠️ dijo que guardó, pero no usó la herramienta de memoria` | Acción fingida | La respuesta afirma que guardó, anotó o actualizó un recuerdo, o escribe la llamada como texto, y en ese mensaje no hubo ninguna llamada a `save/update/delete_<nombre>_memory` que funcionara. **No se guardó nada.** |
+| `⚠️ pediste guardar y no usó la herramienta de memoria` | Acción fingida | El mensaje pedía guardar un recuerdo ("guárdalo como recuerdo", "anótalo en tu memoria", "memorízalo") y no hubo llamada de memoria. |
+| `⚠️ describió una acción sin usar ninguna herramienta` | Acción fingida | La respuesta narra un paso como `(Accediendo a la carpeta…)` o `*Leyendo el archivo...*` sin haber llamado a ninguna herramienta: lo que cuenta a continuación es inventado. |
+
+### Acciones fingidas
+
+Algunos modelos pequeños, en vez de llamar a la herramienta, escriben como si lo hubieran hecho: "He guardado el recuerdo", "(Accediendo a la carpeta…)". Open WebUI no lo distingue de una acción real. El filtro compara el texto de la respuesta con las herramientas que de verdad se llamaron en ese mensaje y añade el aviso a la línea de estado. En el historial queda en la columna `acciones_fingidas` (`memoria`, `memoria_pedida`, `herramienta`), sin texto del chat.
+
+La detección es por frases en español y prefiere callar a dar falsas alarmas: recordar recuerdos antiguos ("según lo que tengo guardado") o editar archivos con una herramienta no cuenta. Las pruebas están en `test_acciones_fingidas.py`:
+
+```powershell
+python -m unittest test_acciones_fingidas
+```
 
 ## Configurar el filtro
 
