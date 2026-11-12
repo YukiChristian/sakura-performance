@@ -1,7 +1,7 @@
 """
 title: Sakura Performance
-description: Mide el mensaje completo (con búsquedas, comandos y memoria), la voz, avisa de acciones fingidas y guarda un historial sin texto.
-version: 2.3.0
+description: Mide el mensaje completo (búsquedas, comandos, memoria e imágenes con barra de progreso), la voz, avisa de acciones fingidas y guarda un historial sin texto.
+version: 2.4.0
 """
 
 from pydantic import BaseModel, Field
@@ -24,11 +24,29 @@ MEMORY_VERBS = {
     "update": ("actualizó", "no actualizó"),
     "delete": ("borró", "no borró"),
 }
-# Respuestas de los Memory Writer que significan que la operación no se hizo.
+# Respuestas de los Memory Writer que significan que la operación no se hizo. Antes solo se
+# miraba el principio del texto y "Hay varias coincidencias…; no se eliminó ningún recuerdo"
+# o "La actualización es ambigua…; no se hizo ningún cambio" contaban como hechas.
 MEMORY_FAILURE = re.compile(
-    r"^(No se|No pude|.{0,20} no (guardó|actualizó|eliminó))|no afirmes|No se confirmó",
+    r"^(No se|No pude)|\bno\s+(se\s+)?(guardó|actualizó|eliminó|borró|hizo|confirmó)\b|no afirmes|ningún cambio",
     re.IGNORECASE,
 )
+# "Ese recuerdo ya existía (ID 5); no se creó otro": ni guardado nuevo ni fallo.
+MEMORY_DUPLICATE = re.compile(r"\bya exist[ií]a\b", re.IGNORECASE)
+# Herramientas de imagen de Open WebUI (ComfyUI, OpenAI, etc.).
+IMAGE_TOOLS = {"generate_image", "edit_image"}
+PROGRESS_BAR_CELLS = 10
+# Fases que publica el proxy de ComfyUI en /progreso (ver README).
+IMAGE_PHASES = {
+    "abriendo": "🎨 Abriendo ComfyUI…",
+    "cargando": "🎨 Cargando el modelo de imagen…",
+    "generando": "🎨 Generando imagen",
+    "terminada": "🎨 Imagen lista",
+    "error": "🎨 ❌ La imagen falló",
+}
+# Nombre del GGUF de cada perfil del router: se vuelve a preguntar pasado este tiempo
+# (antes se guardaba para siempre y, al cambiar de modelo, el historial seguía con el viejo).
+MODEL_NAME_SECONDS = 300
 # Un mensaje abandonado (error, pestaña cerrada) se olvida a la hora.
 STALE_SECONDS = 3600
 
@@ -108,7 +126,58 @@ CREATE TABLE IF NOT EXISTS mediciones (
 CREATE INDEX IF NOT EXISTS mediciones_fecha ON mediciones (fecha);
 """
 # Columnas añadidas después de la versión 2.0.0 (se crean si faltan).
-EXTRA_COLUMNS = {"decidir_s": "REAL", "vueltas_detalle": "TEXT", "acciones_fingidas": "TEXT"}
+EXTRA_COLUMNS = {
+    "decidir_s": "REAL",
+    "vueltas_detalle": "TEXT",
+    "acciones_fingidas": "TEXT",
+    "imagenes": "INTEGER",
+    "imagen_s": "REAL",
+}
+
+
+def tool_output_failed(output: dict, text: str) -> bool:
+    """Una herramienta puede terminar "completed" y devolver un error: generate_image
+    devuelve {"error": "..."} cuando ComfyUI falla."""
+    if output.get("status") in ("failed", "incomplete"):
+        return True
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+            return isinstance(data, dict) and bool(data.get("error"))
+        except ValueError:
+            return False
+    return stripped.lower().startswith(("error:", "error ", "traceback"))
+
+
+def call_seconds(call: dict):
+    """Duración de una llamada a herramienta que Open WebUI guarda en el mensaje."""
+    duration = call.get("duration")
+    if isinstance(duration, (int, float)):
+        return float(duration)
+    start, end = call.get("started_at"), call.get("ended_at")
+    if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end >= start:
+        return float(end - start)
+    return None
+
+
+def progress_bar(percent: int) -> str:
+    filled = max(0, min(PROGRESS_BAR_CELLS, round(percent * PROGRESS_BAR_CELLS / 100)))
+    return "█" * filled + "░" * (PROGRESS_BAR_CELLS - filled)
+
+
+def image_status(state: dict, elapsed: float) -> str:
+    """Texto de la barra a partir del estado que publica el proxy de ComfyUI."""
+    phase = state.get("fase")
+    label = IMAGE_PHASES.get(phase, "🎨 Preparando la imagen…")
+    if phase == "generando":
+        percent = int(state.get("porcentaje") or 0)
+        return f"{label} {progress_bar(percent)} {percent}% · paso {state.get('paso', 0)}/{state.get('pasos', 0)}"
+    if phase == "terminada":
+        return f"{label} {progress_bar(100)} 100% · {elapsed:.1f}s"
+    if phase == "cargando":
+        return f"{label} {progress_bar(0)} 0%"
+    return label
 
 
 def message_text(message) -> str:
@@ -182,14 +251,19 @@ class Filter:
             default="",
             description="Ruta de una base SQLite para el historial (solo números, nunca texto del chat). Vacío: sin historial.",
         )
+        image_progress_url: str = Field(
+            default="",
+            description="URL de progreso del proxy de ComfyUI (http://127.0.0.1:8190/progreso) para la barra 🎨. Vacío: sin barra.",
+        )
 
     def __init__(self):
         self.valves = self.Valves()
         self.runs: dict = {}
         self.full_model_names: dict = {}
-        # Hora del último mensaje: la espera de voz de un mensaje anterior se detiene
-        # cuando empieza otro, para no atribuirle la voz del nuevo.
-        self.newest_message = 0.0
+        # Hora del último mensaje de cada chat: la espera de voz de un mensaje se detiene
+        # cuando empieza otro en el mismo chat, para no atribuirle la voz del nuevo.
+        # (Antes era una sola hora para todos los chats: un mensaje en otro chat la cortaba.)
+        self.newest_by_chat: dict = {}
 
     # ------------------------------------------------------------------ util
 
@@ -310,8 +384,9 @@ class Filter:
         """Nombre del GGUF que carga el perfil del router (p. ej. Qwen3.5-9B.Q6_K)."""
         if not alias:
             return ""
-        if alias in self.full_model_names:
-            return self.full_model_names[alias]
+        cached = self.full_model_names.get(alias)
+        if cached and time.time() - cached[1] < MODEL_NAME_SECONDS:
+            return cached[0]
         name = ""
         try:
             response = requests.get(f"{base_url}/v1/models", timeout=self.valves.request_timeout)
@@ -342,8 +417,8 @@ class Filter:
                 pass
         name = re.sub(r"\.gguf$", "", name, flags=re.IGNORECASE)
         if name:
-            self.full_model_names[alias] = name
-        return name or alias
+            self.full_model_names[alias] = (name, time.time())
+        return name or (cached[0] if cached else alias)
 
     @staticmethod
     def counter_delta(before: dict, after: dict, name: str):
@@ -387,7 +462,9 @@ class Filter:
 
     async def inlet(self, body: dict, __metadata__: Optional[dict] = None) -> dict:
         run = self.get_run(__metadata__, create=True)
-        self.newest_message = max(self.newest_message, run["wall_start"])
+        chat = str((__metadata__ or {}).get("chat_id") or "") if isinstance(__metadata__, dict) else ""
+        run["chat_id"] = chat
+        self.newest_by_chat[chat] = max(self.newest_by_chat.get(chat, 0.0), run["wall_start"])
         run["metrics_start"] = await self.collect_metrics(self.get_server_urls())
         return body
 
@@ -397,7 +474,7 @@ class Filter:
         self.open_round(run, time.perf_counter())
         return body
 
-    async def stream(self, event: dict, __metadata__: Optional[dict] = None) -> dict:
+    async def stream(self, event: dict, __metadata__: Optional[dict] = None, __event_emitter__=None) -> dict:
         run = self.get_run(__metadata__)
         if run is None:
             return event
@@ -419,6 +496,14 @@ class Filter:
                 name = (call.get("function") or {}).get("name")
                 if name:
                     run["stream_tool_names"].append(name)
+                    # El modelo pidió una imagen: Open WebUI la genera al acabar esta vuelta.
+                    if (
+                        name in IMAGE_TOOLS
+                        and __event_emitter__
+                        and (self.valves.image_progress_url or "").strip()
+                        and not run.get("image_watch")
+                    ):
+                        run["image_watch"] = asyncio.create_task(self.watch_image(run, __event_emitter__))
             if choice.get("finish_reason") is not None:
                 current["end"] = now
                 current["finish_reason"] = choice.get("finish_reason")
@@ -431,6 +516,10 @@ class Filter:
         run = self.runs.pop(key, None)
         if run is None:
             return body
+        run["done"] = True  # detiene la barra de imagen si sigue viva
+        watcher = run.get("image_watch")
+        if watcher is not None and not watcher.done():
+            watcher.cancel()
         now = time.perf_counter()
         rounds = [r for r in run["rounds"] if r.get("end") is not None] or [
             {"start": run["start"], "end": now, "core": None}
@@ -490,23 +579,30 @@ class Filter:
         tool_names, tool_failures = [], 0
         memory_ok = {"save": 0, "update": 0, "delete": 0}
         memory_failed = {"save": 0, "update": 0, "delete": 0}
+        memory_duplicates = 0
+        images, image_seconds = 0, 0.0
         for call_id, call in calls.items():
             name = call.get("name") or ""
             output = outputs.get(call_id) or {}
             text = " ".join(
                 part.get("text", "") for part in output.get("output") or [] if isinstance(part, dict)
             ).strip()
-            failed = output.get("status") in ("failed", "incomplete") or call.get("status") == "failed"
+            failed = call.get("status") == "failed" or tool_output_failed(output, text)
             match = MEMORY_TOOL.match(name)
             if match:
                 verb = match.group(1)
-                if failed or MEMORY_FAILURE.search(text):
+                if not failed and MEMORY_DUPLICATE.search(text):
+                    memory_duplicates += 1
+                elif failed or MEMORY_FAILURE.search(text):
                     memory_failed[verb] += 1
                 else:
                     memory_ok[verb] += 1
             else:
                 tool_names.append(name)
                 tool_failures += int(bool(failed))
+                if name in IMAGE_TOOLS and not failed:
+                    images += 1
+                    image_seconds += call_seconds(call) or 0.0
 
         # Tiempo de herramientas = huecos entre vueltas del modelo.
         tools_seconds = sum(
@@ -551,14 +647,19 @@ class Filter:
                 memory_parts.append(f"{ok_word} {memory_ok[verb]}")
             if memory_failed[verb]:
                 memory_parts.append(f"❌ {fail_word}")
+        if memory_duplicates:
+            memory_parts.append(f"ya existía {memory_duplicates}")
         if memory_parts:
             parts.append("💾 " + ", ".join(memory_parts))
+        if images:
+            word = "imagen" if images == 1 else "imágenes"
+            parts.append(f"🎨 {images} {word} en {image_seconds:.1f}s" if image_seconds else f"🎨 {images} {word}")
         # Acciones fingidas: se compara lo que dice la respuesta con las herramientas que se llamaron.
         user_message = next((m for m in reversed(messages) if m.get("role") == "user"), {})
         faked = find_faked_actions(
             message_text(user_message),
             message_text(assistant),
-            sum(memory_ok.values()),
+            sum(memory_ok.values()) + memory_duplicates,
             sum(memory_failed.values()),
             len(tool_names),
         )
@@ -628,13 +729,55 @@ class Filter:
             "memoria_borrados": memory_ok["delete"],
             "memoria_fallos": sum(memory_failed.values()),
             "acciones_fingidas": ",".join(faked) or None,
+            "imagenes": images,
+            "imagen_s": round(image_seconds, 3) if images and image_seconds else None,
             "linea": line,
         }
         await asyncio.to_thread(self.save_history, key, row)
 
         if (self.valves.tts_url or "").strip() and __event_emitter__:
-            asyncio.create_task(self.watch_voice(key, run["wall_start"], line, __event_emitter__))
+            asyncio.create_task(
+                self.watch_voice(key, run["wall_start"], line, __event_emitter__, run.get("chat_id", ""))
+            )
         return body
+
+    # ----------------------------------------------------------------- imagen
+
+    def get_image_progress(self) -> dict:
+        try:
+            response = requests.get(self.valves.image_progress_url.strip(), timeout=self.valves.request_timeout)
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {}
+        except (requests.RequestException, ValueError):
+            return {}
+
+    async def watch_image(self, run: dict, emitter) -> None:
+        """Barra de progreso mientras Open WebUI genera la imagen. Solo emite cuando cambia el
+        texto (no a cada consulta) para no llenar el historial de estados del mensaje."""
+        try:
+            started = time.time()
+            rounds_at_start = len(run["rounds"])
+            last = None
+            while time.time() - started < 900 and not run.get("done"):
+                # La vuelta siguiente al modelo empieza cuando la herramienta ya terminó: se lee
+                # el estado una última vez (para mostrar "lista") y se para.
+                tool_finished = len(run["rounds"]) > rounds_at_start
+                state = await asyncio.to_thread(self.get_image_progress)
+                # Solo cuenta una imagen empezada después de que el modelo la pidió.
+                if state and float(state.get("iniciada") or 0) < started - 2:
+                    state = {}
+                text = image_status(state, time.time() - started)
+                if text != last and not run.get("done"):
+                    await emitter({"type": "status", "data": {"description": text, "done": False, "hidden": False}})
+                    last = text
+                if state.get("fase") in ("terminada", "error") or tool_finished:
+                    break
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------- voz
 
@@ -650,7 +793,7 @@ class Filter:
         except (requests.RequestException, ValueError, AttributeError):
             return []
 
-    async def watch_voice(self, key: str, wall_start: float, line: str, emitter) -> None:
+    async def watch_voice(self, key: str, wall_start: float, line: str, emitter, chat: str = "") -> None:
         """La voz se genera mientras y después del texto: espera a que callen las frases
         y añade 🔊 a la misma línea. Espera hasta tts_wait_seconds a que pulses la bocina; si nadie la pulsa, no añade nada."""
         try:
@@ -658,7 +801,7 @@ class Filter:
             samples, last_change = [], time.time()
             while time.time() < deadline:
                 await asyncio.sleep(1.5)
-                if not samples and self.newest_message > wall_start:
+                if not samples and self.newest_by_chat.get(chat, 0.0) > wall_start:
                     return
                 current = await asyncio.to_thread(self.get_tts_samples, wall_start)
                 if len(current) != len(samples):

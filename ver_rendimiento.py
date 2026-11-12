@@ -32,8 +32,8 @@ def seconds(ms):
 
 def print_detail(row):
     """Árbol de un mensaje: cada vuelta del modelo y las herramientas entre vueltas."""
-    print(f"{row['fecha'].replace('T', ' ')} · {row['asistente']} · {row['modelo_completo']}")
-    print(f"  {row['linea']}")
+    print(f"{row['fecha'].replace('T', ' ')} · {row['asistente']} · {row['modelo_completo'] or '—'}")
+    print(f"  {row['linea'] or ''}")
     try:
         rounds = json.loads((row["vueltas_detalle"] if "vueltas_detalle" in row.keys() else None) or "[]")
     except (TypeError, ValueError):
@@ -41,7 +41,7 @@ def print_detail(row):
     if not rounds:
         print("  (sin desglose por vuelta: mensaje anterior a la versión 2.1.0)\n")
         return
-    print(f"  ⏱️ {row['total_s']:.1f}s total")
+    print(f"  ⏱️ {fmt(row['total_s'], '{:.1f}s')} total")
     if rounds[0].get("antes_ms"):
         print(f"  ├─ Preparación de Open WebUI       {seconds(rounds[0]['antes_ms'])}")
     for index, item in enumerate(rounds, 1):
@@ -97,8 +97,9 @@ def main():
             " order by fecha desc limit ?",
             (*params, args.ultimos),
         ).fetchall()
+        width = max((len(row["modelo_completo"] or "—") for row in rows), default=0)
         for row in reversed(rows):
-            print(f"{row['fecha'].replace('T', ' ')}  {row['asistente']:<6} {row['modelo_completo']:<24} {row['linea']}")
+            print(f"{row['fecha'].replace('T', ' ')}  {row['asistente']:<6} {row['modelo_completo'] or '—':<{width}} {row['linea'] or ''}")
         return
 
     print(f"Historial desde {since[:10]} ({args.dias} días)\n")
@@ -114,10 +115,11 @@ def main():
     if not groups:
         print("Sin mensajes en ese periodo.")
         return
-    print("Asistente  Modelo                    Mensajes  Total   1er token  t/s    Prompt t/s  Contexto  Caché")
+    width = max(25, *(len(g["modelo_completo"] or "—") for g in groups))
+    print(f"Asistente  {'Modelo':<{width}} Mensajes  Total   1er token  t/s    Prompt t/s  Contexto  Caché")
     for g in groups:
         print(
-            f"{g['asistente']:<10} {g['modelo_completo'] or '—':<25} {g['mensajes']:>8}  "
+            f"{g['asistente']:<10} {g['modelo_completo'] or '—':<{width}} {g['mensajes']:>8}  "
             f"{fmt(g['total'], '{:.1f} s'):>6}  {fmt(g['ttft'], '{:.2f} s'):>9}  {fmt(g['tps'], '{:.0f}'):>4}  "
             f"{fmt(g['prompt_tps'], '{:.0f}'):>10}  {fmt(g['contexto'], '{:.0f}%'):>8}  {fmt(g['cache'], '{:.0f}%'):>5}"
         )
@@ -159,6 +161,25 @@ def main():
         f"  {memory['guardados'] or 0} guardados · {memory['actualizados'] or 0} actualizaciones · "
         f"{memory['borrados'] or 0} borrados · fallos: {memory['fallos'] or 0}"
     )
+
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(mediciones)")}
+    print("\nImágenes")
+    if {"imagenes", "imagen_s"} <= columns:
+        images = conn.execute(
+            f"""select count(*) mensajes, sum(imagenes) imagenes, sum(imagen_s) / sum(imagenes) promedio,
+                       min(imagen_s / imagenes) minimo, max(imagen_s / imagenes) maximo
+                from mediciones where {clause} and imagenes > 0 and imagen_s is not null""",
+            params,
+        ).fetchone()
+        if images["mensajes"]:
+            print(
+                f"  {images['imagenes']} imágenes · {fmt(images['promedio'], '{:.1f} s')} de promedio "
+                f"(entre {fmt(images['minimo'], '{:.1f}')} y {fmt(images['maximo'], '{:.1f} s')})"
+            )
+        else:
+            print("  Ninguna en este periodo.")
+    else:
+        print("  Sin datos: se miden desde la versión 2.4.0 del filtro.")
 
     voice = conn.execute(
         f"""select count(*) mensajes, sum(voz_frases) frases, sum(voz_sintesis_s) / sum(voz_audio_s) rtf,

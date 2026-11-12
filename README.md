@@ -14,8 +14,8 @@ Ejemplos en Open WebUI:
 
 ## Archivos
 
-- `filter.py`: el filtro de Open WebUI (versión 2.3.0).
-- `test_acciones_fingidas.py`: pruebas del aviso de acciones fingidas.
+- `filter.py`: el filtro de Open WebUI (versión 2.4.0).
+- `test_filtro.py` y `test_acciones_fingidas.py`: pruebas (`python -m unittest test_filtro test_acciones_fingidas`).
 - `ver_rendimiento.py`: resumen del historial que guarda el filtro (opcional).
 - `metrics.py`: servicio Flask local con los endpoints `/health` y `/snapshot` (opcional).
 - `start_sakura.ps1`: inicia el helper de métricas y `llama-server` con los parámetros de ejemplo.
@@ -39,11 +39,34 @@ Los demás aparecen solo cuando ocurren:
 | Indicador | Cuándo aparece | Qué mide |
 | --- | --- | --- |
 | `🤔 6.3s + 🔧 2 en 7.9s + ✍️ 9.7s = 23.9s` | El modelo usó herramientas | 🤔 lo que tardó en pensar qué hacer (las vueltas antes de la última), 🔧 cuántas herramientas usó y cuánto esperó por ellas (con `(1 falló)` si alguna falló), ✍️ la respuesta final. La suma da el total. |
-| `💾 leyó 3, guardó 1` | Hubo recuerdos | Recuerdos que el proxy de memoria leyó para la conversación, y los que se guardaron, actualizaron o borraron. `❌ no guardó` si una escritura falló. |
+| `💾 leyó 3, guardó 1` | Hubo recuerdos | Recuerdos que el proxy de memoria leyó para la conversación, y los que se guardaron, actualizaron o borraron. `❌ no guardó` si una escritura falló; `ya existía 1` si el recuerdo ya estaba guardado. |
+| `🎨 1 imagen en 13.6s` | Se generó una imagen | Imágenes que hizo `generate_image` o `edit_image` y cuánto tardó la herramienta (desde que Open WebUI la llama hasta que la imagen está lista). Una imagen que devuelve `{"error": …}` cuenta como herramienta fallida. |
 | `🔊 RTF 0.45` | Se reprodujo la voz | Segundos de síntesis entre segundos de audio. Por debajo de 1 la voz fluye; con `⚠️` va más lenta que el texto y se corta entre frases. Se añade cuando termina el audio. |
 | `⚠️ dijo que guardó, pero no usó la herramienta de memoria` | Acción fingida | La respuesta afirma que guardó, anotó o actualizó un recuerdo, o escribe la llamada como texto, y en ese mensaje no hubo ninguna llamada a `save/update/delete_<nombre>_memory` que funcionara. **No se guardó nada.** |
 | `⚠️ pediste guardar y no usó la herramienta de memoria` | Acción fingida | El mensaje pedía guardar un recuerdo ("guárdalo como recuerdo", "anótalo en tu memoria", "memorízalo") y no hubo llamada de memoria. |
 | `⚠️ describió una acción sin usar ninguna herramienta` | Acción fingida | La respuesta narra un paso como `(Accediendo a la carpeta…)` o `*Leyendo el archivo...*` sin haber llamado a ninguna herramienta: lo que cuenta a continuación es inventado. |
+
+### Barra de progreso de la imagen
+
+Mientras se genera una imagen, el filtro muestra en el estado del mensaje:
+
+```text
+🎨 Abriendo ComfyUI…
+🎨 Cargando el modelo de imagen… ░░░░░░░░░░ 0%
+🎨 Generando imagen ████░░░░░░ 38% · paso 3/8
+🎨 Imagen lista ██████████ 100% · 13.6s
+```
+
+Al terminar el mensaje, la línea normal la sustituye y conserva `🎨 1 imagen en 13.6s`.
+
+Open WebUI no expone el progreso de ComfyUI: ComfyUI lo manda por WebSocket solo al cliente que pidió la imagen. Para leerlo hace falta un proxy entre Open WebUI y ComfyUI que mire esos mensajes (`execution_start`, `progress`, `executing`) sin cambiarlos y publique el estado en un endpoint HTTP:
+
+```json
+GET http://127.0.0.1:8190/progreso
+{"fase": "generando", "paso": 3, "pasos": 8, "porcentaje": 38, "iniciada": 1794460000.1, "actualizada": 1794460004.7, "prompt_id": "…"}
+```
+
+`fase` puede ser `abriendo`, `cargando`, `generando`, `terminada`, `error` o `inactivo`. Pon esa URL en la válvula `image_progress_url`; vacía, no hay barra (el tiempo `🎨` se mide igual). El filtro empieza a consultar cuando el modelo llama a la herramienta de imagen, solo acepta imágenes que empezaron después de esa llamada y solo emite un estado cuando cambia el texto, para no llenar el historial de estados del mensaje.
 
 ### Acciones fingidas
 
@@ -70,6 +93,7 @@ python -m unittest test_acciones_fingidas
 | `tts_url` | URL del servidor de voz para `🔊`, por ejemplo `http://127.0.0.1:5052`. Vacío: sin voz. |
 | `tts_wait_seconds` | Cuánto esperar a que se pulse la bocina después del texto (300 por defecto). |
 | `history_db` | Ruta de una base SQLite para el historial. Vacío: sin historial. |
+| `image_progress_url` | URL de progreso de imagen, por ejemplo `http://127.0.0.1:8190/progreso` (ver "Barra de progreso de la imagen"). Vacío: sin barra. |
 
 El filtro usa el hook `request` de Open WebUI 0.13, que se ejecuta antes de cada vuelta al modelo, y lee las herramientas y sus resultados del mensaje final en `outlet`. Con versiones anteriores sigue funcionando, pero 🔧 marca 0 s.
 
@@ -94,7 +118,7 @@ El filtro usa el hook `request` de Open WebUI 0.13, que se ejecuta antes de cada
 
 ## Historial
 
-Con `history_db` configurada, cada mensaje se guarda en la tabla `mediciones`: fecha, asistente, modelo, **nombre completo del GGUF** (por ejemplo `Qwen3.5-9B.Q6_K`), tiempos, herramientas usadas, recuerdos, voz y el desglose de cada vuelta. **Nunca se guarda texto del chat.**
+Con `history_db` configurada, cada mensaje se guarda en la tabla `mediciones`: fecha, asistente, modelo, **nombre completo del GGUF** (por ejemplo `Qwen3.5-9B.Q6_K`, consultado de nuevo cada 5 minutos para que un cambio de modelo se note), tiempos, herramientas usadas, recuerdos, imágenes (`imagenes`, `imagen_s`), voz y el desglose de cada vuelta. **Nunca se guarda texto del chat.**
 
 ```powershell
 python ver_rendimiento.py --db C:\ruta\rendimiento.db               # promedios de los últimos 7 días
