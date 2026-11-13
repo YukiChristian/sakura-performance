@@ -8,13 +8,13 @@ Ejemplos en Open WebUI:
 
 ```text
 ⏱️ 2.10s · ⚡ 0.62s · 🚀 98.3t/s · 🟢 8.4K/81.9K (10%)
-⏱️ 23.94s · ⚡ 3.18s · 🚀 81.8t/s · 🟢 18.1K/81.9K (22%) · 🤔 6.3s + 🔧 2 en 7.9s + ✍️ 9.7s = 23.9s
+⏱️ 23.94s · ⚡ 3.18s · 🚀 81.8t/s · 🟢 18.1K/81.9K (22%) · ⏳ 2.0s + 🤔 4.3s + 🔧 2 en 7.9s + ✍️ 9.7s = 23.9s
 ⏱️ 6.40s · ⚡ 0.58s · 🚀 97.8t/s · 🟢 12.1K/81.9K (15%) · 🤔 1.9s + 🔧 1 en 0.3s + ✍️ 4.2s = 6.4s · 💾 leyó 3, guardó 1 · 🔊 RTF 0.45
 ```
 
 ## Archivos
 
-- `filter.py`: el filtro de Open WebUI (versión 2.5.0).
+- `filter.py`: el filtro de Open WebUI (versión 2.6.0).
 - `test_filtro.py` y `test_acciones_fingidas.py`: pruebas (`python -m unittest test_filtro test_acciones_fingidas`).
 - `ver_rendimiento.py`: resumen del historial que guarda el filtro (opcional).
 - `metrics.py`: servicio Flask local con los endpoints `/health` y `/snapshot` (opcional).
@@ -38,7 +38,7 @@ Los demás aparecen solo cuando ocurren:
 
 | Indicador | Cuándo aparece | Qué mide |
 | --- | --- | --- |
-| `🤔 6.3s + 🔧 2 en 7.9s + ✍️ 9.7s = 23.9s` | El modelo usó herramientas | 🤔 lo que tardó en pensar qué hacer (las vueltas antes de la última), 🔧 cuántas herramientas usó y cuánto esperó por ellas (con `(1 falló)` si alguna falló), ✍️ la respuesta final. La suma da el total. |
+| `⏳ 2.0s + 🤔 4.3s + 🔧 2 en 7.9s + ✍️ 9.7s = 23.9s` | El modelo usó herramientas | ⏳ la preparación de Open WebUI antes de la primera vuelta (filtros, plantillas), 🤔 lo que tardó en pensar qué hacer (las vueltas antes de la última), 🔧 cuántas herramientas usó y cuánto esperó por ellas (con `(1 falló)` si alguna falló), ✍️ la respuesta final. La suma da el total. |
 | `💾 leyó 3, guardó 1` | Hubo recuerdos | Recuerdos que el proxy de memoria leyó para la conversación, y los que se guardaron, actualizaron o borraron. `❌ no guardó` si una escritura falló; `ya existía 1` si el recuerdo ya estaba guardado. |
 | `🎨 1 imagen en 13.6s` | Se generó una imagen | Imágenes que hizo `generate_image` o `edit_image` y cuánto tardó la herramienta (desde que Open WebUI la llama hasta que la imagen está lista). Una imagen que devuelve `{"error": …}` cuenta como herramienta fallida. |
 | `🔊 RTF 0.45` | Se reprodujo la voz | Segundos de síntesis entre segundos de audio. Por debajo de 1 la voz fluye; con `⚠️` va más lenta que el texto y se corta entre frases. Se añade cuando termina el audio. |
@@ -76,7 +76,7 @@ El filtro usa el hook `request` de Open WebUI 0.13, que se ejecuta antes de cada
 
 ## Qué necesita cada indicador
 
-- **Tiempos, 🤔, 🔧 y ✍️:** solo Open WebUI.
+- **Tiempos, ⏳, 🤔, 🔧 y ✍️:** solo Open WebUI.
 - **🚀 y contexto:** `/metrics` (llama-server con `--metrics`) y `/slots`.
 - **💾 leyó N y desglose exacto por vuelta (opcional):** si tienes un proxy entre Open WebUI y `llama-server`, puede añadir al último fragmento del stream un campo `sakura_metrics` con números, nunca texto:
 

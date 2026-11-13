@@ -1,7 +1,7 @@
 """
 title: Sakura Performance
 description: Mide el mensaje completo (búsquedas, comandos, memoria e imágenes), la voz, avisa de acciones fingidas y guarda un historial sin texto.
-version: 2.5.0
+version: 2.6.0
 """
 
 from pydantic import BaseModel, Field
@@ -123,6 +123,7 @@ EXTRA_COLUMNS = {
     "acciones_fingidas": "TEXT",
     "imagenes": "INTEGER",
     "imagen_s": "REAL",
+    "preparacion_s": "REAL",
 }
 
 
@@ -565,6 +566,9 @@ class Filter:
             max(0.0, rounds[i + 1]["start"] - rounds[i]["end"]) for i in range(len(rounds) - 1)
         )
         final_seconds = rounds[-1]["end"] - rounds[-1]["start"] if len(rounds) > 1 else None
+        # Preparación de Open WebUI antes de la primera vuelta (filtros, plantillas, RAG).
+        # Antes se sumaba a 🤔 y "pensar" parecía más lento de lo que era.
+        prep_seconds = max(0.0, rounds[0]["start"] - run["start"])
         core_metrics = [r["core"] for r in rounds if r.get("core")]
         memories_read = core_metrics[0].get("memories") if core_metrics else None
         retrieval_ms = sum(c.get("retrieval_ms") or 0 for c in core_metrics) if core_metrics else None
@@ -583,18 +587,20 @@ class Filter:
             parts.append(f"{icon} {context_used / 1000:.1f}K/{context_max / 1000:.1f}K ({percent:.0f}%)")
         else:
             parts.append("⚪ contexto n/d")
-        # Con herramientas: 🤔 pensar qué hacer + 🔧 herramientas + ✍️ respuesta final = total.
-        # 🤔 se calcula como resto de los valores redondeados para que la suma cuadre.
+        # Con herramientas: ⏳ preparación + 🤔 pensar qué hacer + 🔧 herramientas + ✍️ respuesta
+        # final = total. 🤔 se calcula como resto de los valores redondeados para que la suma cuadre.
         decide_seconds = None
         if final_seconds is not None:
             total_r, tools_r, final_r = round(total_time, 1), round(tools_seconds, 1), round(final_seconds, 1)
-            decide_seconds = max(0.0, total_r - tools_r - final_r)
+            prep_r = round(prep_seconds, 1)
+            decide_seconds = max(0.0, total_r - prep_r - tools_r - final_r)
             all_calls = len(calls)
             text = f"🔧 {all_calls} en {tools_r:.1f}s"
             failures = tool_failures + sum(memory_failed.values())
             if failures:
                 text += f" ({failures} {'falló' if failures == 1 else 'fallaron'})"
-            parts.append(f"🤔 {decide_seconds:.1f}s + {text} + ✍️ {final_r:.1f}s = {total_r:.1f}s")
+            prep_text = f"⏳ {prep_r:.1f}s + " if prep_r >= 0.1 else ""
+            parts.append(f"{prep_text}🤔 {decide_seconds:.1f}s + {text} + ✍️ {final_r:.1f}s = {total_r:.1f}s")
         memory_parts = []
         if memories_read:
             memory_parts.append(f"leyó {memories_read}")
@@ -669,7 +675,8 @@ class Filter:
             "vueltas": len(rounds),
             "herramientas": len(tool_names),
             "herramientas_fallidas": tool_failures,
-            "herramientas_s": round(tools_seconds, 3) if tool_names else None,
+            "herramientas_s": round(tools_seconds, 3) if final_seconds is not None else None,
+            "preparacion_s": round(prep_seconds, 3),
             "herramientas_nombres": json.dumps(
                 {n: tool_names.count(n) for n in sorted(set(tool_names))}, ensure_ascii=False
             )

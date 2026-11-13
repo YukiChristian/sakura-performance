@@ -116,6 +116,43 @@ class OutletTests(unittest.TestCase):
         line = self.run_message(flt, [call("a", "generate_image", 2.0), output("a", '{"error": "sin VRAM"}')])
         self.assertNotIn("🎨", line)
 
+    def test_preparation_and_memory_only_tools(self):
+        """⏳ separa la preparación de 🤔, y con solo herramientas de memoria el historial
+        guarda igual su tiempo (antes quedaba vacío aunque la línea mostraba 🔧)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "r.db")
+            flt = self.make_filter(db)
+            meta = {"message_id": "m2", "chat_id": "c1"}
+            statuses = []
+
+            async def emitter(event):
+                statuses.append(event["data"]["description"])
+
+            async def go():
+                done = {"choices": [{"delta": {"content": "x"}, "finish_reason": "stop"}]}
+                await flt.inlet({}, meta)
+                await asyncio.sleep(0.3)  # preparación de Open WebUI
+                await flt.request({}, meta)
+                await flt.stream(done, meta)
+                await asyncio.sleep(0.2)  # herramienta de memoria
+                await flt.request({}, meta)
+                await flt.stream(done, meta)
+                body = {"messages": [{"role": "user", "content": "Hola"},
+                                     {"role": "assistant", "content": "Listo.", "output": [
+                                         call("a", "save_sakura_memory"), output("a", "Recuerdo guardado (ID 9).")]}]}
+                await flt.outlet(body, meta, emitter)
+
+            asyncio.run(go())
+            line = statuses[-1]
+            self.assertRegex(line, r"⏳ 0\.[3-9]s \+ 🤔 [\d.]+s \+ 🔧 1 en 0\.2s \+ ✍️ [\d.]+s = [\d.]+s")
+            conn = sqlite3.connect(db)
+            try:
+                tools_s, prep_s = conn.execute("select herramientas_s, preparacion_s from mediciones").fetchone()
+            finally:
+                conn.close()
+            self.assertAlmostEqual(tools_s, 0.2, delta=0.1)
+            self.assertGreaterEqual(prep_s, 0.3)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
