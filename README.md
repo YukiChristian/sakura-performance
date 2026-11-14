@@ -14,7 +14,7 @@ Ejemplos en Open WebUI:
 
 ## Archivos
 
-- `filter.py`: el filtro de Open WebUI (versión 2.6.0).
+- `filter.py`: el filtro de Open WebUI (versión 2.7.0).
 - `test_filtro.py` y `test_acciones_fingidas.py`: pruebas (`python -m unittest test_filtro test_acciones_fingidas`).
 - `ver_rendimiento.py`: resumen del historial que guarda el filtro (opcional).
 - `metrics.py`: servicio Flask local con los endpoints `/health` y `/snapshot` (opcional).
@@ -41,6 +41,7 @@ Los demás aparecen solo cuando ocurren:
 | `⏳ 2.0s + 🤔 4.3s + 🔧 2 en 7.9s + ✍️ 9.7s = 23.9s` | El modelo usó herramientas | ⏳ la preparación de Open WebUI antes de la primera vuelta (filtros, plantillas), 🤔 lo que tardó en pensar qué hacer (las vueltas antes de la última), 🔧 cuántas herramientas usó y cuánto esperó por ellas (con `(1 falló)` si alguna falló), ✍️ la respuesta final. La suma da el total. |
 | `💾 leyó 3, guardó 1` | Hubo recuerdos | Recuerdos que el proxy de memoria leyó para la conversación, y los que se guardaron, actualizaron o borraron. `❌ no guardó` si una escritura falló; `ya existía 1` si el recuerdo ya estaba guardado. |
 | `🎨 1 imagen en 13.6s` | Se generó una imagen | Imágenes que hizo `generate_image` o `edit_image` y cuánto tardó la herramienta (desde que Open WebUI la llama hasta que la imagen está lista). Una imagen que devuelve `{"error": …}` cuenta como herramienta fallida. |
+| `📝 nota guardada` | Se usó una nota de Open WebUI | `write_note` creó una nota (`guardada`) o `replace_note_content` la editó (`actualizada`); `❌ nota no guardada` si falló. Una nota guardada cuenta como "guardar" para el aviso de acción fingida. |
 | `🔊 RTF 0.45` | Se reprodujo la voz | Segundos de síntesis entre segundos de audio. Por debajo de 1 la voz fluye; con `⚠️` va más lenta que el texto y se corta entre frases. Se añade cuando termina el audio. |
 | `⚠️ dijo que guardó, pero no usó la herramienta de memoria` | Acción fingida | La respuesta afirma que guardó, anotó o actualizó un recuerdo, o escribe la llamada como texto, y en ese mensaje no hubo ninguna llamada a `save/update/delete_<nombre>_memory` que funcionara. **No se guardó nada.** |
 | `⚠️ pediste guardar y no usó la herramienta de memoria` | Acción fingida | El mensaje pedía guardar un recuerdo ("guárdalo como recuerdo", "anótalo en tu memoria", "memorízalo") y no hubo llamada de memoria. |
@@ -86,7 +87,7 @@ El filtro usa el hook `request` de Open WebUI 0.13, que se ejecuta antes de cada
   ```
 
   `timings` son los que `llama-server` envía en su último fragmento. Sin este campo, el filtro calcula la velocidad con las diferencias de `/metrics`.
-- **💾 guardó, actualizó o borró:** herramientas llamadas `save_<nombre>_memory`, `update_<nombre>_memory` y `delete_<nombre>_memory`. Una respuesta que empiece por "No se…" cuenta como fallo.
+- **💾 guardó, actualizó o borró:** herramientas llamadas `save_<nombre>_memory`, `update_<nombre>_memory` y `delete_<nombre>_memory`, y las de memoria de Open WebUI (`add_memory`, `update_memory`, `replace_memory_content`, `delete_memory`). Una respuesta que empiece por "No se…" cuenta como fallo.
 - **🔊:** el servidor de voz debe exponer `GET /metrics?since=<epoch>` y devolver las frases terminadas después de esa hora:
 
   ```json

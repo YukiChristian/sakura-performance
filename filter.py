@@ -1,7 +1,7 @@
 """
 title: Sakura Performance
 description: Mide el mensaje completo (búsquedas, comandos, memoria e imágenes), la voz, avisa de acciones fingidas y guarda un historial sin texto.
-version: 2.6.0
+version: 2.7.0
 """
 
 from pydantic import BaseModel, Field
@@ -19,6 +19,12 @@ import requests
 
 # Herramientas de memoria de cada asistente: save_sakura_memory, update_lain_memory...
 MEMORY_TOOL = re.compile(r"^(save|update|delete)_[a-z0-9]+_memory$")
+# Memoria propia de Open WebUI (herramientas integradas): cuentan igual que save/update/delete.
+NATIVE_MEMORY = {"add_memory": "save", "update_memory": "update", "replace_memory_content": "update",
+                 "delete_memory": "delete"}
+# Notas de Open WebUI: write_note crea una nota y replace_note_content la edita. Antes "Ya quedó
+# guardada en la nota" se marcaba como acción fingida aunque write_note sí la guardó (2026-11-13).
+NOTE_TOOLS = {"write_note": "save", "replace_note_content": "update"}
 MEMORY_VERBS = {
     "save": ("guardó", "no guardó"),
     "update": ("actualizó", "no actualizó"),
@@ -124,6 +130,7 @@ EXTRA_COLUMNS = {
     "imagenes": "INTEGER",
     "imagen_s": "REAL",
     "preparacion_s": "REAL",
+    "notas": "INTEGER",
 }
 
 
@@ -538,6 +545,8 @@ class Filter:
         memory_failed = {"save": 0, "update": 0, "delete": 0}
         memory_duplicates = 0
         images, image_seconds = 0, 0.0
+        notes_ok = {"save": 0, "update": 0}
+        notes_failed = 0
         for call_id, call in calls.items():
             name = call.get("name") or ""
             output = outputs.get(call_id) or {}
@@ -546,8 +555,8 @@ class Filter:
             ).strip()
             failed = call.get("status") == "failed" or tool_output_failed(output, text)
             match = MEMORY_TOOL.match(name)
-            if match:
-                verb = match.group(1)
+            verb = NATIVE_MEMORY.get(name) or (match.group(1) if match else None)
+            if verb:
                 if not failed and MEMORY_DUPLICATE.search(text):
                     memory_duplicates += 1
                 elif failed or MEMORY_FAILURE.search(text):
@@ -557,6 +566,11 @@ class Filter:
             else:
                 tool_names.append(name)
                 tool_failures += int(bool(failed))
+                if name in NOTE_TOOLS:
+                    if failed:
+                        notes_failed += 1
+                    else:
+                        notes_ok[NOTE_TOOLS[name]] += 1
                 if name in IMAGE_TOOLS and not failed:
                     images += 1
                     image_seconds += call_seconds(call) or 0.0
@@ -616,12 +630,22 @@ class Filter:
         if images:
             word = "imagen" if images == 1 else "imágenes"
             parts.append(f"🎨 {images} {word} en {image_seconds:.1f}s" if image_seconds else f"🎨 {images} {word}")
+        note_parts = []
+        for kind, (one, many) in {"save": ("guardada", "guardadas"), "update": ("actualizada", "actualizadas")}.items():
+            n = notes_ok[kind]
+            if n:
+                note_parts.append(f"nota {one}" if n == 1 else f"{n} notas {many}")
+        if notes_failed:
+            note_parts.append("❌ nota no guardada")
+        if note_parts:
+            parts.append("📝 " + ", ".join(note_parts))
         # Acciones fingidas: se compara lo que dice la respuesta con las herramientas que se llamaron.
         user_message = next((m for m in reversed(messages) if m.get("role") == "user"), {})
         faked = find_faked_actions(
             message_text(user_message),
             message_text(assistant),
-            sum(memory_ok.values()) + memory_duplicates,
+            # una nota guardada también es "guardar": "Ya quedó guardada en la nota" es cierto
+            sum(memory_ok.values()) + memory_duplicates + sum(notes_ok.values()),
             sum(memory_failed.values()),
             len(tool_names),
         )
@@ -693,6 +717,7 @@ class Filter:
             "memoria_fallos": sum(memory_failed.values()),
             "acciones_fingidas": ",".join(faked) or None,
             "imagenes": images,
+            "notas": sum(notes_ok.values()),
             "imagen_s": round(image_seconds, 3) if images and image_seconds else None,
             "linea": line,
         }

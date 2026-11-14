@@ -153,6 +153,28 @@ class OutletTests(unittest.TestCase):
             self.assertAlmostEqual(tools_s, 0.2, delta=0.1)
             self.assertGreaterEqual(prep_s, 0.3)
 
+    def test_saved_note_is_not_a_faked_action(self):
+        """write_note guardó la nota: "Ya quedó guardada en la nota" es cierto (2026-11-13)."""
+        flt = self.make_filter()
+        line = self.run_message(
+            flt,
+            [call("a", "write_note"), output("a", '{"status": "success", "id": "n1"}')],
+            answer="¡Listo, Christian! Ya quedó guardada en la nota.",
+            user="Quiero que guardes esta nota en Open WebUI",
+        )
+        self.assertIn("📝 nota guardada", line)
+        self.assertNotIn("⚠️", line)
+
+    def test_failed_note(self):
+        flt = self.make_filter()
+        line = self.run_message(
+            flt,
+            [call("a", "write_note"), output("a", '{"error": "Failed to create note"}')],
+            answer="Ya quedó guardada en la nota.",
+        )
+        self.assertIn("📝 ❌ nota no guardada", line)
+        self.assertIn("⚠️ dijo que guardó", line)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
